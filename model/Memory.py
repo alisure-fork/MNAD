@@ -1,12 +1,9 @@
 import torch
-import torch.autograd as ag
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-import math
 import functools
-import random
+import numpy as np
+import torch.nn as nn
 from torch.nn import functional as F
+
 
 def random_uniform(shape, low, high, cuda):
     x = torch.rand(*shape)
@@ -15,43 +12,48 @@ def random_uniform(shape, low, high, cuda):
         return result_cpu.cuda()
     else:
         return result_cpu
+    pass
+
     
 def distance(a, b):
     return torch.sqrt(((a - b) ** 2).sum()).unsqueeze(0)
+
 
 def distance_batch(a, b):
     bs, _ = a.shape
     result = distance(a[0], b)
     for i in range(bs-1):
         result = torch.cat((result, distance(a[i], b)), 0)
-        
     return result
+
 
 def multiply(x): #to flatten matrix into a vector 
     return functools.reduce(lambda x,y: x*y, x, 1)
+
 
 def flatten(x):
     """ Flatten matrix into a vector """
     count = multiply(x.size())
     return x.resize_(count)
 
+
 def index(batch_size, x):
     idx = torch.arange(0, batch_size).long() 
     idx = torch.unsqueeze(idx, -1)
     return torch.cat((idx, x), dim=1)
 
-def MemoryLoss(memory):
 
+def MemoryLoss(memory):
     m, d = memory.size()
     memory_t = torch.t(memory)
     similarity = (torch.matmul(memory, memory_t))/2 + 1/2 # 30X30
     identity_mask = torch.eye(m).cuda()
     sim = torch.abs(similarity - identity_mask)
-    
     return torch.sum(sim)/(m*(m-1))
 
 
 class Memory(nn.Module):
+
     def __init__(self, memory_size, feature_dim, key_dim,  temp_update, temp_gather):
         super(Memory, self).__init__()
         # Constants
@@ -60,17 +62,15 @@ class Memory(nn.Module):
         self.key_dim = key_dim
         self.temp_update = temp_update
         self.temp_gather = temp_gather
+        pass
         
     def hard_neg_mem(self, mem, i):
         similarity = torch.matmul(mem,torch.t(self.keys_var))
         similarity[:,i] = -1
         _, max_idx = torch.topk(similarity, 1, dim=1)
-        
-        
         return self.keys_var[max_idx]
     
     def random_pick_memory(self, mem, max_indices):
-        
         m, d = mem.size()
         output = []
         for i in range(m):
@@ -81,11 +81,10 @@ class Memory(nn.Module):
                 output.append(flattened_indices[number, 0])
             else:
                 output.append(-1)
-            
+            pass
         return torch.tensor(output)
     
     def get_update_query(self, mem, max_indices, update_indices, score, query, train):
-        
         m, d = mem.size()
         if train:
             query_update = torch.zeros((m,d)).cuda()
@@ -103,10 +102,8 @@ class Memory(nn.Module):
                 else:
                     query_update[i] = 0 
                     #random_update[i] = 0
-        
-       
-            return query_update 
-    
+                pass
+            return query_update
         else:
             query_update = torch.zeros((m,d)).cuda()
             for i in range(m):
@@ -119,8 +116,9 @@ class Memory(nn.Module):
 #                     query_update[i] = torch.sum(query[idx].squeeze(1), dim=0)
                 else:
                     query_update[i] = 0 
-            
+                pass
             return query_update
+        pass
 
     def get_score(self, mem, query):
         bs, h,w,d = query.size()
@@ -131,11 +129,9 @@ class Memory(nn.Module):
         
         score_query = F.softmax(score, dim=0)
         score_memory = F.softmax(score,dim=1)
-        
         return score_query, score_memory
     
     def forward(self, query, keys, train=True):
-
         batch_size, dims,h,w = query.size() # b X d X h X w
         query = F.normalize(query, dim=1)
         query = query.permute(0,2,3,1) # b X h X w X d
@@ -150,31 +146,21 @@ class Memory(nn.Module):
             updated_query, softmax_score_query,softmax_score_memory = self.read(query, keys)
             #update
             updated_memory = self.update(query, keys, train)
-            
             return updated_query, updated_memory, softmax_score_query, softmax_score_memory, gathering_loss, spreading_loss
-        
-        #test
-        else:
+        else:  # test
             #gathering loss
             gathering_loss = self.gather_loss(query,keys, train)
-            
             # read
             updated_query, softmax_score_query,softmax_score_memory = self.read(query, keys)
-            
             #update
             updated_memory = keys
-                
-               
             return updated_query, updated_memory, softmax_score_query, softmax_score_memory, gathering_loss
-        
-        
+        pass
     
     def update(self, query, keys,train):
-        
         batch_size, h,w,dims = query.size() # b X h X w X d 
         
         softmax_score_query, softmax_score_memory = self.get_score(keys, query)
-        
         query_reshape = query.contiguous().view(batch_size*h*w, dims)
         
         _, gathering_indices = torch.topk(softmax_score_memory, 1, dim=1)
@@ -184,7 +170,6 @@ class Memory(nn.Module):
             # top-1 queries (of each memory) update (weighted sum) & random pick 
             query_update = self.get_update_query(keys, gathering_indices, updating_indices, softmax_score_query, query_reshape,train)
             updated_memory = F.normalize(query_update + keys, dim=1)
-        
         else:
             # only weighted sum update when test 
             query_update = self.get_update_query(keys, gathering_indices, updating_indices, softmax_score_query, query_reshape, train)
@@ -196,24 +181,19 @@ class Memory(nn.Module):
       
         return updated_memory.detach()
         
-        
     def pointwise_gather_loss(self, query_reshape, keys, gathering_indices, train):
         n,dims = query_reshape.size() # (b X h X w) X d
         loss_mse = torch.nn.MSELoss(reduction='none')
-        
         pointwise_loss = loss_mse(query_reshape, keys[gathering_indices].squeeze(1).detach())
-                
         return pointwise_loss
         
     def spread_loss(self,query, keys, train):
         batch_size, h,w,dims = query.size() # b X h X w X d
 
         loss = torch.nn.TripletMarginLoss(margin=1.0)
-
         softmax_score_query, softmax_score_memory = self.get_score(keys, query)
 
         query_reshape = query.contiguous().view(batch_size*h*w, dims)
-
         _, gathering_indices = torch.topk(softmax_score_memory, 2, dim=1)
 
         #1st, 2nd closest memories
@@ -221,40 +201,31 @@ class Memory(nn.Module):
         neg = keys[gathering_indices[:,1]]
 
         spreading_loss = loss(query_reshape,pos.detach(), neg.detach())
-
         return spreading_loss
         
     def gather_loss(self, query, keys, train):
-        
         batch_size, h,w,dims = query.size() # b X h X w X d
 
         loss_mse = torch.nn.MSELoss()
-
         softmax_score_query, softmax_score_memory = self.get_score(keys, query)
-
         query_reshape = query.contiguous().view(batch_size*h*w, dims)
-
         _, gathering_indices = torch.topk(softmax_score_memory, 1, dim=1)
 
         gathering_loss = loss_mse(query_reshape, keys[gathering_indices].squeeze(1).detach())
-
         return gathering_loss
-            
-        
-        
-    
+
     def read(self, query, updated_memory):
         batch_size, h,w,dims = query.size() # b X h X w X d
 
         softmax_score_query, softmax_score_memory = self.get_score(updated_memory, query)
-
         query_reshape = query.contiguous().view(batch_size*h*w, dims)
-        
         concat_memory = torch.matmul(softmax_score_memory.detach(), updated_memory) # (b X h X w) X d
         updated_query = torch.cat((query_reshape, concat_memory), dim = 1) # (b X h X w) X 2d
         updated_query = updated_query.view(batch_size, h, w, 2*dims)
         updated_query = updated_query.permute(0,3,1,2)
         
         return updated_query, softmax_score_query, softmax_score_memory
-    
+
+    pass
+
     

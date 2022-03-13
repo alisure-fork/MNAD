@@ -1,12 +1,10 @@
-import numpy as np
 import os
-import torch
-import torch.utils.data as data
-import torchvision.transforms as transforms
-from torch.utils.data import DataLoader
-from PIL import Image
-import os.path
 import sys
+import torch
+import os.path
+import numpy as np
+from PIL import Image
+import torch.utils.data as data
 
 
 def pil_loader(path):
@@ -14,6 +12,7 @@ def pil_loader(path):
     with open(path, 'rb') as f:
         img = Image.open(f)
         return img.convert('RGB')
+    pass
 
 
 def accimage_loader(path):
@@ -23,6 +22,7 @@ def accimage_loader(path):
     except IOError:
         # Potentially a decoding problem, fall back to PIL.Image
         return pil_loader(path)
+    pass
 
 
 def default_loader(path):
@@ -31,7 +31,9 @@ def default_loader(path):
         return accimage_loader(path)
     else:
         return pil_loader(path)
-    
+    pass
+
+
 def make_dataset(dir, class_to_idx):
     frames = []
     print(sorted(class_to_idx.keys()))
@@ -53,12 +55,13 @@ def make_dataset(dir, class_to_idx):
                 
                 path = os.path.join(root, fname)
                 frames.append(path)
-       
+                pass
+            pass
+        pass
     return frames
 
 
 class DatasetFolder(data.Dataset):
-   
 
     def __init__(self, root, loader=default_loader,transform=None, target_transform=None, length=5):
         classes, class_to_idx = self._find_classes(root)
@@ -81,6 +84,7 @@ class DatasetFolder(data.Dataset):
 
         self.transform = transform
         self.target_transform = target_transform
+        pass
 
     def _find_classes(self, dir):
         """
@@ -109,16 +113,13 @@ class DatasetFolder(data.Dataset):
             tuple: (samples, gt(+length)) 
         
         """
-        
-        
         sample = []          
         
         path_start = self.samples[index]
         sample_start = self.loader(path_start)
         if self.transform is not None:
             sample_start = self.transform(sample_start)
-       
-       
+
         sample.append(sample_start) 
         
         for i in range(self.length - 1):
@@ -128,8 +129,8 @@ class DatasetFolder(data.Dataset):
                 sample_immediate = self.transform(sample_immediate)
              
             sample.append(sample_immediate)
-        
-        
+            pass
+
 #         path_gt = self.samples_gt[index]
 #         sample_gt = self.loader(path_gt)
      
@@ -143,12 +144,10 @@ class DatasetFolder(data.Dataset):
         return sample_input
     
     def _stride(self):
-        
         stride = int(np.random.choice(3,1) + 1)
         #if stride != 1:
 #             self.samples_gt = self.samples_all[self.length*stride:]
          #   self.samples = self.samples_all[:-(self.length*stride)]
-        
         return stride
 
     def __len__(self):
@@ -164,23 +163,18 @@ class DatasetFolder(data.Dataset):
         fmt_str += '{0}{1}'.format(tmp, self.target_transform.__repr__().replace('\n', '\n' + ' ' * len(tmp)))
         return fmt_str
 
+    pass
+
 
 IMG_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', 'webp']
 
 
-
-
-
 class ImageFolder(DatasetFolder):
     
-    
-    
-    def __init__(self, root, transform=None, target_transform=None,
-                 loader=default_loader, length=5):
-        super(ImageFolder, self).__init__(root, loader,
-                                          transform=transform,
-                                          target_transform=target_transform)
+    def __init__(self, root, transform=None, target_transform=None, loader=default_loader, length=5):
+        super(ImageFolder, self).__init__(root, loader, transform=transform, target_transform=target_transform)
         self.imgs = self.samples
-        
+        pass
 
+    pass
 

@@ -1,34 +1,15 @@
-import numpy as np
 import os
-import sys
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-import torchvision
-import torch.nn.init as init
-import torch.utils.data as data
-import torch.utils.data.dataset as dataset
-import torchvision.datasets as dset
-import torchvision.transforms as transforms
-from torch.autograd import Variable
-import torchvision.utils as v_utils
-import matplotlib.pyplot as plt
-import cv2
-import math
-from collections import OrderedDict
-import copy
 import time
-from model.utils import DataLoader
-from sklearn.metrics import roc_auc_score
-from utils import *
-import random
-
 import argparse
+from utils import *
+import torch.optim as optim
+import torch.utils.data as data
+from model.utils import DataLoader
+from torch.autograd import Variable
+import torchvision.transforms as transforms
 
 
 parser = argparse.ArgumentParser(description="MNAD")
-parser.add_argument('--gpus', nargs='+', type=str, help='gpus')
 parser.add_argument('--batch_size', type=int, default=4, help='batch size for training')
 parser.add_argument('--test_batch_size', type=int, default=1, help='batch size for test')
 parser.add_argument('--epochs', type=int, default=60, help='number of epochs for training')
@@ -45,39 +26,32 @@ parser.add_argument('--mdim', type=int, default=512, help='channel dimension of 
 parser.add_argument('--msize', type=int, default=10, help='number of the memory items')
 parser.add_argument('--num_workers', type=int, default=2, help='number of workers for the train loader')
 parser.add_argument('--num_workers_test', type=int, default=1, help='number of workers for the test loader')
+parser.add_argument('--dataset_path', type=str, default='./data', help='directory of data')
+
+
 parser.add_argument('--dataset_type', type=str, default='ped2', help='type of dataset: ped2, avenue, shanghai')
-parser.add_argument('--dataset_path', type=str, default='./dataset', help='directory of data')
-parser.add_argument('--exp_dir', type=str, default='log', help='directory of log')
+parser.add_argument('--exp_dir', type=str, default='./log/ped2_2', help='directory of log')
+
+# parser.add_argument('--dataset_type', type=str, default='avenue', help='type of dataset: ped2, avenue, shanghai')
+# parser.add_argument('--exp_dir', type=str, default='./log/avenue', help='directory of log')
+
 
 args = parser.parse_args()
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-if args.gpus is None:
-    gpus = "0"
-    os.environ["CUDA_VISIBLE_DEVICES"]= gpus
-else:
-    gpus = ""
-    for i in range(len(args.gpus)):
-        gpus = gpus + args.gpus[i] + ","
-    os.environ["CUDA_VISIBLE_DEVICES"]= gpus[:-1]
+os.environ["CUDA_VISIBLE_DEVICES"]= "0"
+torch.backends.cudnn.enabled = True  # make sure to use cudnn for computational performance
 
-torch.backends.cudnn.enabled = True # make sure to use cudnn for computational performance
-
-train_folder = args.dataset_path+"/"+args.dataset_type+"/training/frames"
-test_folder = args.dataset_path+"/"+args.dataset_type+"/testing/frames"
 
 # Loading dataset
-train_dataset = DataLoader(train_folder, transforms.Compose([
-             transforms.ToTensor(),          
-             ]), resize_height=args.h, resize_width=args.w, time_step=args.t_length-1)
-
-test_dataset = DataLoader(test_folder, transforms.Compose([
-             transforms.ToTensor(),            
-             ]), resize_height=args.h, resize_width=args.w, time_step=args.t_length-1)
-
+train_folder = args.dataset_path+"/"+args.dataset_type+"/training/frames"
+test_folder = args.dataset_path+"/"+args.dataset_type+"/testing/frames"
+train_dataset = DataLoader(train_folder, transforms.Compose([transforms.ToTensor()]),
+                           resize_height=args.h, resize_width=args.w, time_step=args.t_length-1)
+test_dataset = DataLoader(test_folder, transforms.Compose([transforms.ToTensor()]),
+                          resize_height=args.h, resize_width=args.w, time_step=args.t_length-1)
 train_size = len(train_dataset)
 test_size = len(test_dataset)
-
 train_batch = data.DataLoader(train_dataset, batch_size = args.batch_size, 
                               shuffle=True, num_workers=args.num_workers, drop_last=True)
 test_batch = data.DataLoader(test_dataset, batch_size = args.test_batch_size, 
@@ -104,14 +78,13 @@ model.cuda()
 log_dir = os.path.join('./exp', args.dataset_type, args.method, args.exp_dir)
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
-orig_stdout = sys.stdout
-f = open(os.path.join(log_dir, 'log.txt'),'w')
-sys.stdout= f
+# orig_stdout = sys.stdout
+# f = open(os.path.join(log_dir, 'log.txt'),'w')
+# sys.stdout= f
 
-loss_func_mse = nn.MSELoss(reduction='none')
 
 # Training
-
+loss_func_mse = nn.MSELoss(reduction='none')
 m_items = F.normalize(torch.rand((args.msize, args.mdim), dtype=torch.float), dim=1).cuda() # Initialize the memory items
 
 for epoch in range(args.epochs):
@@ -120,15 +93,14 @@ for epoch in range(args.epochs):
     
     start = time.time()
     for j,(imgs) in enumerate(train_batch):
-        
         imgs = Variable(imgs).cuda()
         
         if args.method == 'pred':
-            outputs, _, _, m_items, softmax_score_query, softmax_score_memory, separateness_loss, compactness_loss = model.forward(imgs[:,0:12], m_items, True)
-        
+            (outputs, _, _, m_items, softmax_score_query, softmax_score_memory,
+             separateness_loss, compactness_loss) = model.forward(imgs[:,0:12], m_items, True)
         else:
-            outputs, _, _, m_items, softmax_score_query, softmax_score_memory, separateness_loss, compactness_loss = model.forward(imgs, m_items, True)
-        
+            (outputs, _, _, m_items, softmax_score_query, softmax_score_memory,
+             separateness_loss, compactness_loss) = model.forward(imgs, m_items, True)
         
         optimizer.zero_grad()
         if args.method == 'pred':
@@ -139,26 +111,38 @@ for epoch in range(args.epochs):
         loss = loss_pixel + args.loss_compact * compactness_loss + args.loss_separate * separateness_loss
         loss.backward(retain_graph=True)
         optimizer.step()
-        
+        pass
+
     scheduler.step()
-    
+
+
     print('----------------------------------------')
     print('Epoch:', epoch+1)
+
+    # Save the model and the memory items
+    print('Training of Epoch {} is finished'.format(epoch + 1))
+    if (epoch + 1) % 5 == 0:
+        torch.save(model, os.path.join(log_dir, 'model_{}.pth'.format(epoch + 1)))
+        torch.save(m_items, os.path.join(log_dir, 'keys_{}.pt'.format(epoch + 1)))
+        print('Saving model of {} in {}'.format(epoch + 1, log_dir))
+        pass
+
     if args.method == 'pred':
-        print('Loss: Prediction {:.6f}/ Compactness {:.6f}/ Separateness {:.6f}'.format(loss_pixel.item(), compactness_loss.item(), separateness_loss.item()))
+        print('Loss: Prediction {:.6f}/ Compactness {:.6f}/ Separateness {:.6f}'.format(
+            loss_pixel.item(), compactness_loss.item(), separateness_loss.item()))
     else:
-        print('Loss: Reconstruction {:.6f}/ Compactness {:.6f}/ Separateness {:.6f}'.format(loss_pixel.item(), compactness_loss.item(), separateness_loss.item()))
+        print('Loss: Reconstruction {:.6f}/ Compactness {:.6f}/ Separateness {:.6f}'.format(
+            loss_pixel.item(), compactness_loss.item(), separateness_loss.item()))
     print('Memory_items:')
     print(m_items)
     print('----------------------------------------')
-    
+    pass
+
 print('Training is finished')
 # Save the model and the memory items
 torch.save(model, os.path.join(log_dir, 'model.pth'))
 torch.save(m_items, os.path.join(log_dir, 'keys.pt'))
     
-sys.stdout = orig_stdout
-f.close()
-
-
+# sys.stdout = orig_stdout
+# f.close()
 
