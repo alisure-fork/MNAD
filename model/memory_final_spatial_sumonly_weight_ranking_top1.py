@@ -83,10 +83,10 @@ class Memory(nn.Module):
         return torch.tensor(output)
     
     def get_update_query(self, mem, max_indices, update_indices, score, query, train):
+
         m, d = mem.size()
         if train:
-            query_update = torch.zeros((m,d)).cuda()
-            # random_update = torch.zeros((m,d)).cuda()
+            query_update = torch.zeros((m,d)).to(mem.device)
             for i in range(m):
                 idx = torch.nonzero(max_indices.squeeze(1)==i)
                 a, _ = idx.size()
@@ -96,7 +96,7 @@ class Memory(nn.Module):
                     query_update[i] = 0
             return query_update
         else:
-            query_update = torch.zeros((m,d)).cuda()
+            query_update = torch.zeros((m,d)).to(mem.device)
             for i in range(m):
                 idx = torch.nonzero(max_indices.squeeze(1)==i)
                 a, _ = idx.size()

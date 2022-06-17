@@ -1,5 +1,6 @@
 import os
 import glob
+import random
 import argparse
 import warnings
 from utils import *
@@ -13,7 +14,7 @@ import torchvision.transforms as transforms
 from model.Reconstruction import convAE as ConvAERecon
 from model.utils import DataLoader, DataLoaderSketchFlow
 from model.final_future_prediction_with_memory_spatial_sumonly_weight_ranking_top1 import convAE as ConvAEPred
-from model.final_future_prediction_with_memory_spatial_sumonly_weight_ranking_top1 import ConvAESketchFlow
+from model.final_future_prediction_with_memory_spatial_sumonly_weight_ranking_top1 import GCNNet, GraphSageNet, GatedGCNNet, MyGCNNet, ConvAESketchFlow
 
 
 warnings.filterwarnings("ignore")
@@ -33,43 +34,14 @@ def gpu_setup(use_gpu, gpu_id):
     return device
 
 
-def get_arg():
-    parser = argparse.ArgumentParser(description="MNAD")
-    parser.add_argument('--batch_size', type=int, default=4, help='batch size for training')
-    parser.add_argument('--test_batch_size', type=int, default=1, help='batch size for test')
-    parser.add_argument('--epochs', type=int, default=60, help='number of epochs for training')
-    parser.add_argument('--loss_compact', type=float, default=0.1, help='weight of the feature compactness loss')
-    parser.add_argument('--loss_separate', type=float, default=0.1, help='weight of the feature separateness loss')
-    parser.add_argument('--h', type=int, default=256, help='height of input images')
-    parser.add_argument('--w', type=int, default=256, help='width of input images')
-    parser.add_argument('--c', type=int, default=3, help='channel of input images')
-    parser.add_argument('--lr', type=float, default=2e-4, help='initial learning rate')
-    parser.add_argument('--method', type=str, default='pred', help='The target task for anoamly detection')
-    parser.add_argument('--t_length', type=int, default=5, help='length of the frame sequences')
-    parser.add_argument('--fdim', type=int, default=512, help='channel dimension of the features')
-    parser.add_argument('--mdim', type=int, default=512, help='channel dimension of the memory items')
-    parser.add_argument('--msize', type=int, default=10, help='number of the memory items')
-    parser.add_argument('--alpha', type=float, default=0.6, help='weight for the anomality score')
-    parser.add_argument('--th', type=float, default=0.01, help='threshold for test updating')
-    parser.add_argument('--num_workers', type=int, default=2, help='number of workers for the train loader')
-    parser.add_argument('--num_workers_test', type=int, default=1, help='number of workers for the test loader')
-    parser.add_argument('--dataset_path', type=str, default='./data', help='directory of data')
-
-    parser.add_argument('--dataset_type', type=str, default='ped2', help='type of dataset: ped2, avenue, shanghai')
-    parser.add_argument('--exp_dir', type=str, default='./log/ped2_3', help='directory of log')
-
-    # parser.add_argument('--dataset_type', type=str, default='avenue', help='type of dataset: ped2, avenue, shanghai')
-    # parser.add_argument('--exp_dir', type=str, default='./log/avenue_2', help='directory of log')
-
-    args = parser.parse_args()
-
-    args.has_sketch_flow = True
-    assert args.method == 'pred' or args.method == 'recon', 'Wrong task name'
-
-    args.device = gpu_setup(use_gpu=True, gpu_id="0")
-
+def seed_setup(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.enabled = True  # make sure to use cudnn for computational performance
-    return args
+    pass
 
 
 class Runner(object):
@@ -77,7 +49,8 @@ class Runner(object):
     def __init__(self, args):
         self.args = args
 
-        self.log_dir = Tools.new_dir(os.path.join('./exp', self.args.dataset_type, self.args.method, self.args.exp_dir))
+        self.log_dir = Tools.new_dir(os.path.join('./result/exp', self.args.dataset_type,
+                                                  self.args.method, self.args.exp_dir))
 
         # Loading dataset
         self.train_folder = os.path.join(self.args.dataset_path, self.args.dataset_type, "training/frames")
@@ -88,10 +61,12 @@ class Runner(object):
             self.sketch_flow_test_folder = os.path.join(self.args.dataset_path, "sketch", self.args.dataset_type, "testing/sketch_flow")
             self.train_dataset = DataLoaderSketchFlow(self.train_folder, self.sketch_flow_train_folder,
                                                       transforms.Compose([transforms.ToTensor()]), resize_height=self.args.h,
-                                                      resize_width=self.args.w, time_step=self.args.t_length-1)
+                                                      resize_width=self.args.w, time_step=self.args.t_length-1,
+                                                      which_sketch_flow=self.args.which_sketch_flow)
             self.test_dataset = DataLoaderSketchFlow(self.test_folder, self.sketch_flow_test_folder,
                                                      transforms.Compose([transforms.ToTensor()]), resize_height=self.args.h,
-                                                     resize_width=self.args.w, time_step=self.args.t_length - 1)
+                                                     resize_width=self.args.w, time_step=self.args.t_length - 1,
+                                                      which_sketch_flow=self.args.which_sketch_flow)
             self.train_batch = data.DataLoader(self.train_dataset, batch_size=self.args.batch_size,
                                                shuffle=True, num_workers=self.args.num_workers,
                                                drop_last=True, collate_fn=self.train_dataset.collate_fn)
@@ -116,7 +91,11 @@ class Runner(object):
         # Model setting
         if self.args.method == 'pred':
             if self.args.has_sketch_flow:
-                self.model = ConvAESketchFlow(self.args.c, self.args.t_length, self.args.msize, self.args.fdim, self.args.mdim)
+                node_dim = 4
+                if self.args.has_sketch_flow == "all":
+                    node_dim = 8
+                gcn_net = MyGCNNet(node_dim=node_dim, in_dim=128, hidden_dims=self.args.hidden_dims, out_dim=512, gnn=self.args.which_gnn)
+                self.model = ConvAESketchFlow(self.args.c, self.args.t_length, self.args.msize, self.args.fdim, self.args.mdim, gcn_net=gcn_net)
             else:
                 self.model = ConvAEPred(self.args.c, self.args.t_length, self.args.msize, self.args.fdim, self.args.mdim)
                 pass
@@ -131,11 +110,11 @@ class Runner(object):
 
         self.optimizer = torch.optim.Adam(self.params, lr=self.args.lr)
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.args.epochs)
-        self.model.cuda()
+        self.model.to(args.device)
 
         # Training
         self.loss_func_mse = nn.MSELoss(reduction='none')
-        self.m_items = F.normalize(torch.rand((self.args.msize, self.args.mdim), dtype=torch.float), dim=1).cuda()
+        self.m_items = F.normalize(torch.rand((self.args.msize, self.args.mdim), dtype=torch.float), dim=1).to(args.device)
         pass
 
     def train(self):
@@ -336,6 +315,41 @@ class Runner(object):
     pass
 
 
+def get_arg(gpu_id=0, run_name="demo", has_sketch_flow=True, which_sketch_flow="cluster", which_gnn=GCNNet, hidden_dims=None):
+    parser = argparse.ArgumentParser(description="MNAD")
+    parser.add_argument('--batch_size', type=int, default=4, help='batch size for training')
+    parser.add_argument('--test_batch_size', type=int, default=1, help='batch size for test')
+    parser.add_argument('--epochs', type=int, default=60, help='number of epochs for training')
+    parser.add_argument('--loss_compact', type=float, default=0.1, help='weight of the feature compactness loss')
+    parser.add_argument('--loss_separate', type=float, default=0.1, help='weight of the feature separateness loss')
+    parser.add_argument('--h', type=int, default=256, help='height of input images')
+    parser.add_argument('--w', type=int, default=256, help='width of input images')
+    parser.add_argument('--c', type=int, default=3, help='channel of input images')
+    parser.add_argument('--lr', type=float, default=2e-4, help='initial learning rate')
+    parser.add_argument('--method', type=str, default='pred', help='The target task for anoamly detection')
+    parser.add_argument('--t_length', type=int, default=5, help='length of the frame sequences')
+    parser.add_argument('--fdim', type=int, default=512, help='channel dimension of the features')
+    parser.add_argument('--mdim', type=int, default=512, help='channel dimension of the memory items')
+    parser.add_argument('--msize', type=int, default=10, help='number of the memory items')
+    parser.add_argument('--alpha', type=float, default=0.6, help='weight for the anomality score')
+    parser.add_argument('--th', type=float, default=0.01, help='threshold for test updating')
+    parser.add_argument('--num_workers', type=int, default=2, help='number of workers for the train loader')
+    parser.add_argument('--num_workers_test', type=int, default=1, help='number of workers for the test loader')
+    parser.add_argument('--dataset_path', type=str, default='./data', help='directory of data')
+    parser.add_argument('--dataset_type', type=str, default='ped2', help='type of dataset: ped2, avenue, shanghai')
+    parser.add_argument('--exp_dir', type=str, default='{}_{}'.format(gpu_id, run_name), help='directory of log')
+    args = parser.parse_args()
+
+    args.device = gpu_setup(use_gpu=True, gpu_id=str(gpu_id))
+    args.which_sketch_flow = which_sketch_flow
+    args.gcn_net = which_sketch_flow
+    args.which_gnn = which_gnn
+    args.hidden_dims = hidden_dims
+    args.has_sketch_flow = has_sketch_flow
+    assert args.method == 'pred' or args.method == 'recon', 'Wrong task name'
+    return args
+
+
 """
 No Sketch Flow, AUC=93.5%
    Sketch Flow, AUC=94.7%
@@ -344,14 +358,56 @@ No Sketch Flow, AUC=93.5%
          Param, AUC=94.4%
          Param, AUC=96.6%
       Original, AUC=96.3%
-      
-   Sketch Flow, AUC=95.9%
-   Sketch Flow, AUC=96.1%
+
+   Sketch Flow, AUC=96.1% 4layer GCN track_line
+   Sketch Flow, AUC=96.7% 4layer GCN cluster
+   Sketch Flow, AUC=96.6% 4layer GraphSage cluster
+   Sketch Flow, AUC=95.3% 4layer GatedGCN cluster
+   
+   Sketch Flow, AUC=96.6% 6layer GCN cluster
+   Sketch Flow, AUC=97.0% 6layer GCN cluster
+"""
+
+
+"""
+cluster_sage_6layer 96.45, 96.78
+cluster_gcn_6layer  93.96, 91.46
+seed2022 cluster_GraphSaageNet_4layer 95.53
+seed2022 cluster_GraphSaageNet_6layer 95.28
+
+seed1 No sketch_flow               94.84
+seed1 cluster_GraphSaageNet_4layer 93.83
+seed1 cluster_GraphSaageNet_6layer 94.42
+
+seed1 No sketch_flow               95.97
+seed2 cluster_GraphSaageNet_4layer 96.21
+seed2 cluster_GraphSaageNet_6layer 96.68
+
+seed3 No sketch_flow               94.18
+seed3 cluster_GraphSaageNet_4layer 95.28
+seed3 cluster_GraphSaageNet_6layer 95.32
+
+seed4 No sketch_flow               94.93
+seed4 cluster_GraphSaageNet_4layer 94.99
+seed4 cluster_GraphSaageNet_6layer 95.13
 """
 
 
 if __name__ == '__main__':
-    runner = Runner(args=get_arg())
+    seed = 2
+    gpu_id = 2
+    has_sketch_flow = True
+    which_sketch_flow = "all"
+    # which_sketch_flow = "cluster"  # cluster, track_line
+    # which_sketch_flow = "track_line"  # cluster, track_line
+    which_gnn = GraphSageNet  # GCNNet, GraphSageNet, GatedGCNNet
+    # hidden_dims = [128, 128, 256, 256]  # [128, 128, 256, 256, 512, 512], [128, 128, 256, 256]
+    hidden_dims = [128, 128, 256, 256, 512, 512]  # [128, 128, 256, 256, 512, 512], [128, 128, 256, 256]
+
+    seed_setup(seed)
+    runner = Runner(args=get_arg(gpu_id=gpu_id, has_sketch_flow=has_sketch_flow, which_sketch_flow=which_sketch_flow,
+                                 which_gnn=which_gnn, hidden_dims=hidden_dims,
+                                 run_name="{}_{}_{}layer_{}seed".format(which_sketch_flow, which_gnn.__name__, len(hidden_dims), seed)))
     runner.train()
     pass
 

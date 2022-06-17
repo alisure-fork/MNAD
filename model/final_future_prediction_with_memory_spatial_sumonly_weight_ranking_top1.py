@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from .memory_final_spatial_sumonly_weight_ranking_top1 import *
 
 
+sys.path.append("./GCN/benchmarking-gnns")
 sys.path.append("../GCN/benchmarking-gnns")
 
 
@@ -234,11 +235,9 @@ class GatedGCNNet(nn.Module):
 
 class MyGCNNet(nn.Module):
 
-    def __init__(self, node_dim=4, in_dim=128, hidden_dims=[128, 128, 128, 128], out_dim=1):
+    def __init__(self, node_dim=4, in_dim=128, hidden_dims=[128, 128, 128, 128], out_dim=1, gnn=GCNNet):
         super().__init__()
-        self.model_gnn = GCNNet(node_dim=node_dim, in_dim=in_dim, hidden_dims=hidden_dims, out_dim=out_dim)
-        # self.model_gnn = GraphSageNet(node_dim=node_dim, in_dim=in_dim, hidden_dims=hidden_dims, out_dim=out_dim)
-        # self.model_gnn = GatedGCNNet(node_dim=node_dim, in_dim=in_dim, hidden_dims=hidden_dims, out_dim=out_dim)
+        self.model_gnn = gnn(node_dim=node_dim, in_dim=in_dim, hidden_dims=hidden_dims, out_dim=out_dim)
         pass
 
     def forward(self, batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt):
@@ -251,12 +250,12 @@ class MyGCNNet(nn.Module):
 class ConvAESketchFlow(torch.nn.Module):
 
     def __init__(self, n_channel=3, t_length=5, memory_size=10, feature_dim=512,
-                 key_dim=512, temp_update=0.1, temp_gather=0.1):
+                 key_dim=512, temp_update=0.1, temp_gather=0.1, gcn_net=None):
         super(ConvAESketchFlow, self).__init__()
 
         self.encoder = Encoder(t_length, n_channel)
         self.decoder = Decoder(t_length, n_channel)
-        self.gcn = MyGCNNet(node_dim=4, in_dim=128, hidden_dims=[128, 128, 256, 256], out_dim=512)
+        self.gcn = gcn_net
         self.memory = Memory(memory_size,feature_dim, key_dim, temp_update, temp_gather)
         pass
 

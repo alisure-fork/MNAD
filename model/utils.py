@@ -10,9 +10,6 @@ from collections import namedtuple
 from collections import OrderedDict
 
 
-rng = np.random.RandomState(2020)
-
-
 def np_load_frame(filename, resize_height, resize_width):
     image_decoded = cv2.imread(filename)
     image_resized = cv2.resize(image_decoded, (resize_width, resize_height))
@@ -139,7 +136,8 @@ class SketchFlowGraph(object):
 
 class DataLoaderSketchFlow(data.Dataset):
 
-    def __init__(self, video_folder, sketch_flow_folder, transform, resize_height, resize_width, time_step=4, num_pred=1):
+    def __init__(self, video_folder, sketch_flow_folder, transform, resize_height, resize_width,
+                 time_step=4, num_pred=1, which_sketch_flow="cluster"):
         self.video_folder = video_folder
         self.sketch_flow_folder = sketch_flow_folder
         self.transform = transform
@@ -147,13 +145,14 @@ class DataLoaderSketchFlow(data.Dataset):
         self._resize_width = resize_width
         self._time_step = time_step
         self._num_pred = num_pred
+        self.which_sketch_flow = which_sketch_flow
 
-        self.videos = self.setup(self.video_folder, self.sketch_flow_folder, self._resize_width)
+        self.videos = self.setup(self.video_folder, self.sketch_flow_folder, self._resize_width, self.which_sketch_flow)
         self.samples = self.get_all_samples()
         pass
 
     @staticmethod
-    def setup(video_folder, sketch_flow_folder, image_size):
+    def setup(video_folder, sketch_flow_folder, image_size, which_sketch_flow):
         videos = OrderedDict()
         video_images = glob.glob(os.path.join(video_folder, '*'))
         for video in tqdm(sorted(video_images)):
@@ -168,10 +167,8 @@ class DataLoaderSketchFlow(data.Dataset):
             for frame in videos[video_name]['frame']:
                 video_name = frame.split("/")[-2]
                 index = int(os.path.splitext(frame.split("/")[-1])[0])
-                # sketch_flow_path = os.path.join(
-                #     sketch_flow_folder, "{}/25_40_25/{}/9/track_line/{}.txt".format(video_name, video_name, index))
                 sketch_flow_path = os.path.join(
-                    sketch_flow_folder, "{}/25_40_25/{}/9/cluster/{}.txt".format(video_name, video_name, index))
+                    sketch_flow_folder, "{}/25_40_25/{}/9/{}/{}.txt".format(video_name, video_name, which_sketch_flow, index))
                 assert os.path.exists(sketch_flow_path)
                 graph =  SketchFlowGraph(sketch_flow_path, image_size)
                 videos[video_name]['sketch_flow'].append(graph)
