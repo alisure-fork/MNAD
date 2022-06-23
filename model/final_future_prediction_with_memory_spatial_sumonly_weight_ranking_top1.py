@@ -250,21 +250,29 @@ class MyGCNNet(nn.Module):
 class ConvAESketchFlow(torch.nn.Module):
 
     def __init__(self, n_channel=3, t_length=5, memory_size=10, feature_dim=512,
-                 key_dim=512, temp_update=0.1, temp_gather=0.1, gcn_net=None):
+                 key_dim=512, temp_update=0.1, temp_gather=0.1, gcn_nets=None):
         super(ConvAESketchFlow, self).__init__()
 
         self.encoder = Encoder(t_length, n_channel)
         self.decoder = Decoder(t_length, n_channel)
-        self.gcn = gcn_net
+        self.gcns = gcn_nets
         self.memory = Memory(memory_size,feature_dim, key_dim, temp_update, temp_gather)
         pass
 
-    def forward(self, x, keys, batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt, train=True):
+    def forward(self, x, keys, batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt, train=True,
+                batched_graph_2=None, nodes_feat_2=None, edges_feat_2=None, nodes_num_norm_sqrt_2=None, edges_num_norm_sqrt_2=None):
         fea, skip1, skip2, skip3 = self.encoder(x)
 
-        gcn_feature = self.gcn.forward(batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt)
+        gcn_feature = self.gcns[0].forward(batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt)
         gcn_feature_softmax = torch.softmax(gcn_feature, dim=1)
-        fea = fea + fea * gcn_feature_softmax.unsqueeze(-1).unsqueeze(-1)
+
+        if batched_graph_2 is None:
+            fea = fea + fea * gcn_feature_softmax.unsqueeze(-1).unsqueeze(-1)
+        else:
+            gcn_feature_2 = self.gcns[1].forward(batched_graph_2, nodes_feat_2, edges_feat_2, nodes_num_norm_sqrt_2, edges_num_norm_sqrt_2)
+            gcn_feature_softmax_2 = torch.softmax(gcn_feature_2, dim=1)
+            fea = fea + (fea * gcn_feature_softmax.unsqueeze(-1).unsqueeze(-1) + fea * gcn_feature_softmax_2.unsqueeze(-1).unsqueeze(-1)) / 2
+            pass
 
         if train:
             updated_fea, keys, softmax_score_query, softmax_score_memory, separateness_loss, compactness_loss = self.memory(fea, keys, train)

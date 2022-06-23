@@ -89,7 +89,21 @@ class SketchFlowGraph(object):
     def __len__(self):
         return len(self.node_data)
 
-    def set_edge(self):
+    def set_edge(self, th=0.2):
+        edge_index, edge_w = [], []
+        for one in self.node_data:
+            _edge_w = []
+            for two in self.node_data:
+                dis = np.sqrt((one.point[0] - two.point[0]) ** 2 + (one.point[1] - two.point[1]) ** 2)
+                if dis < th:
+                    _edge_w.append(1 - dis / th)
+                    edge_index.append([one.index, two.index])
+                pass
+            edge_w.extend(_edge_w / np.sum(_edge_w, axis=0))
+            pass
+        return np.asarray(edge_index), np.asarray(edge_w)
+
+    def set_edge_2(self):
         edge_index, edge_w = [], []
         for one in self.node_data:
             _edge_w = []
@@ -137,7 +151,7 @@ class SketchFlowGraph(object):
 class DataLoaderSketchFlow(data.Dataset):
 
     def __init__(self, video_folder, sketch_flow_folder, transform, resize_height, resize_width,
-                 time_step=4, num_pred=1, which_sketch_flow="cluster"):
+                 time_step=4, num_pred=1, which_sketch_flow=["cluster"]):
         self.video_folder = video_folder
         self.sketch_flow_folder = sketch_flow_folder
         self.transform = transform
@@ -146,6 +160,7 @@ class DataLoaderSketchFlow(data.Dataset):
         self._time_step = time_step
         self._num_pred = num_pred
         self.which_sketch_flow = which_sketch_flow
+        self.is_two_sketch_flow = len(self.which_sketch_flow) == 2
 
         self.videos = self.setup(self.video_folder, self.sketch_flow_folder, self._resize_width, self.which_sketch_flow)
         self.samples = self.get_all_samples()
@@ -155,6 +170,7 @@ class DataLoaderSketchFlow(data.Dataset):
     def setup(video_folder, sketch_flow_folder, image_size, which_sketch_flow):
         videos = OrderedDict()
         video_images = glob.glob(os.path.join(video_folder, '*'))
+        # video_images = glob.glob(os.path.join(video_folder, '*'))[:1]
         for video in tqdm(sorted(video_images)):
             video_name = video.split('/')[-1]
             videos[video_name] = {}
@@ -167,11 +183,16 @@ class DataLoaderSketchFlow(data.Dataset):
             for frame in videos[video_name]['frame']:
                 video_name = frame.split("/")[-2]
                 index = int(os.path.splitext(frame.split("/")[-1])[0])
-                sketch_flow_path = os.path.join(
-                    sketch_flow_folder, "{}/25_40_25/{}/9/{}/{}.txt".format(video_name, video_name, which_sketch_flow, index))
-                assert os.path.exists(sketch_flow_path)
-                graph =  SketchFlowGraph(sketch_flow_path, image_size)
-                videos[video_name]['sketch_flow'].append(graph)
+
+                graphs = []
+                for one_sketch_flow in which_sketch_flow:
+                    sketch_flow_path = os.path.join(
+                        sketch_flow_folder, "{}/25_40_25/{}/9/{}/{}.txt".format(video_name, video_name, one_sketch_flow, index))
+                    assert os.path.exists(sketch_flow_path)
+                    graph =  SketchFlowGraph(sketch_flow_path, image_size)
+                    graphs.append(graph)
+                    pass
+                videos[video_name]['sketch_flow'].append(graphs)
                 pass
             pass
         return videos
@@ -179,6 +200,7 @@ class DataLoaderSketchFlow(data.Dataset):
     def get_all_samples(self):
         frames = []
         videos = glob.glob(os.path.join(self.video_folder, '*'))
+        # videos = glob.glob(os.path.join(self.video_folder, '*'))[:1]
         for video in sorted(videos):
             video_name = video.split('/')[-1]
             for i in range(len(self.videos[video_name]['frame']) - self._time_step):
@@ -196,33 +218,51 @@ class DataLoaderSketchFlow(data.Dataset):
             batch.append(self.transform(image) if self.transform is not None else image)
             pass
 
-        my_graph = self.videos[video_name]['sketch_flow'][frame_name + self._time_step + self._num_pred - 1]
-        node_data = my_graph.merge_node_data()
-        edge_index, edge_w = my_graph.edge_index, my_graph.edge_w
+        my_graphs = self.videos[video_name]['sketch_flow'][frame_name + self._time_step + self._num_pred - 1]
 
-        graph = dgl.DGLGraph()
-        graph.add_nodes(len(my_graph))
-        graph.add_edges(edge_index[:, 0], edge_index[:, 1])
-        graph.edata['feat'] = torch.from_numpy(edge_w).unsqueeze(1).float()
-        graph.ndata['feat'] = torch.from_numpy(node_data).float()
+        graphs = []
+        for my_graph in my_graphs:
+            node_data = my_graph.merge_node_data()
+            edge_index, edge_w = my_graph.edge_index, my_graph.edge_w
 
-        return np.concatenate(batch, axis=0), graph
+            graph = dgl.DGLGraph()
+            graph.add_nodes(len(my_graph))
+            graph.add_edges(edge_index[:, 0], edge_index[:, 1])
+            graph.edata['feat'] = torch.from_numpy(edge_w).unsqueeze(1).float()
+            graph.ndata['feat'] = torch.from_numpy(node_data).float()
+            graphs.append(graph)
+            pass
+
+        return np.concatenate(batch, axis=0), graphs
 
     def __len__(self):
         return len(self.samples)
 
     @staticmethod
     def collate_fn(samples):
-        images, graphs = map(list, zip(*samples))
+        images, graphs_list = map(list, zip(*samples))
         images = torch.tensor(np.array(images))
 
-        _nodes_num = [graph.number_of_nodes() for graph in graphs]
-        _edges_num = [graph.number_of_edges() for graph in graphs]
-        nodes_num_norm_sqrt = torch.cat([torch.zeros((num, 1)).fill_(1./num) for num in _nodes_num]).sqrt()
-        edges_num_norm_sqrt = torch.cat([torch.zeros((num, 1)).fill_(1./num) for num in _edges_num]).sqrt()
-        batched_graph = dgl.batch(graphs)
+        batched_graphs, nodes_num_norm_sqrts, edges_num_norm_sqrts = [], [], []
+        for i in range(len(graphs_list[0])):
+            graphs = [one[i] for one in graphs_list]
+            _nodes_num = [graph.number_of_nodes() for graph in graphs]
+            _edges_num = [graph.number_of_edges() for graph in graphs]
+            nodes_num_norm_sqrt = torch.cat([torch.zeros((num, 1)).fill_(1./num) for num in _nodes_num]).sqrt()
+            edges_num_norm_sqrt = torch.cat([torch.zeros((num, 1)).fill_(1./num) for num in _edges_num]).sqrt()
+            batched_graph = dgl.batch(graphs)
 
-        return images, batched_graph, nodes_num_norm_sqrt, edges_num_norm_sqrt
+            batched_graphs.append(batched_graph)
+            nodes_num_norm_sqrts.append(nodes_num_norm_sqrt)
+            edges_num_norm_sqrts.append(edges_num_norm_sqrt)
+            pass
+
+        if len(batched_graphs) == 1:
+            return images, batched_graphs[0], nodes_num_norm_sqrts[0], edges_num_norm_sqrts[0]
+        elif len(batched_graphs) == 2:
+            return images, batched_graphs[0], nodes_num_norm_sqrts[0], edges_num_norm_sqrts[0], \
+                   batched_graphs[1], nodes_num_norm_sqrts[1], edges_num_norm_sqrts[1]
+        pass
 
     pass
 
