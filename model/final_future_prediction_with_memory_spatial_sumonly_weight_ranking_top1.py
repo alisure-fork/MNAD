@@ -235,9 +235,9 @@ class GatedGCNNet(nn.Module):
 
 class MyGCNNet(nn.Module):
 
-    def __init__(self, node_dim=4, in_dim=128, hidden_dims=[128, 128, 128, 128], out_dim=1, gnn=GCNNet):
+    def __init__(self, which_gnn=GCNNet, node_dim=4, in_dim=128, hidden_dims=[128, 256], out_dim=1):
         super().__init__()
-        self.model_gnn = gnn(node_dim=node_dim, in_dim=in_dim, hidden_dims=hidden_dims, out_dim=out_dim)
+        self.model_gnn = which_gnn(node_dim=node_dim, in_dim=in_dim, hidden_dims=hidden_dims, out_dim=out_dim)
         pass
 
     def forward(self, batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt):
@@ -250,29 +250,21 @@ class MyGCNNet(nn.Module):
 class ConvAESketchFlow(torch.nn.Module):
 
     def __init__(self, n_channel=3, t_length=5, memory_size=10, feature_dim=512,
-                 key_dim=512, temp_update=0.1, temp_gather=0.1, gcn_nets=None):
+                 key_dim=512, temp_update=0.1, temp_gather=0.1, which_gnn=GCNNet, hidden_dims=[128, 256]):
         super(ConvAESketchFlow, self).__init__()
 
         self.encoder = Encoder(t_length, n_channel)
         self.decoder = Decoder(t_length, n_channel)
-        self.gcns = gcn_nets
-        self.memory = Memory(memory_size,feature_dim, key_dim, temp_update, temp_gather)
+        self.gcn = MyGCNNet(which_gnn=which_gnn, node_dim=4, in_dim=128, hidden_dims=hidden_dims, out_dim=512)
+        self.memory = Memory(memory_size, feature_dim, key_dim, temp_update, temp_gather)
         pass
 
-    def forward(self, x, keys, batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt, train=True,
-                batched_graph_2=None, nodes_feat_2=None, edges_feat_2=None, nodes_num_norm_sqrt_2=None, edges_num_norm_sqrt_2=None):
+    def forward(self, x, keys, batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt, train=True):
         fea, skip1, skip2, skip3 = self.encoder(x)
 
-        gcn_feature = self.gcns[0].forward(batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt)
+        gcn_feature = self.gcn.forward(batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt)
         gcn_feature_softmax = torch.softmax(gcn_feature, dim=1)
-
-        if batched_graph_2 is None:
-            fea = fea + fea * gcn_feature_softmax.unsqueeze(-1).unsqueeze(-1)
-        else:
-            gcn_feature_2 = self.gcns[1].forward(batched_graph_2, nodes_feat_2, edges_feat_2, nodes_num_norm_sqrt_2, edges_num_norm_sqrt_2)
-            gcn_feature_softmax_2 = torch.softmax(gcn_feature_2, dim=1)
-            fea = fea + (fea * gcn_feature_softmax.unsqueeze(-1).unsqueeze(-1) + fea * gcn_feature_softmax_2.unsqueeze(-1).unsqueeze(-1)) / 2
-            pass
+        fea = fea + fea * gcn_feature_softmax.unsqueeze(-1).unsqueeze(-1)
 
         if train:
             updated_fea, keys, softmax_score_query, softmax_score_memory, separateness_loss, compactness_loss = self.memory(fea, keys, train)

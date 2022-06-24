@@ -14,7 +14,7 @@ import torchvision.transforms as transforms
 from model.Reconstruction import convAE as ConvAERecon
 from model.utils import DataLoader, DataLoaderSketchFlow
 from model.final_future_prediction_with_memory_spatial_sumonly_weight_ranking_top1 import convAE as ConvAEPred
-from model.final_future_prediction_with_memory_spatial_sumonly_weight_ranking_top1 import GCNNet, GraphSageNet, GatedGCNNet, MyGCNNet, ConvAESketchFlow
+from model.final_future_prediction_with_memory_spatial_sumonly_weight_ranking_top1 import ConvAESketchFlow, GraphSageNet, GCNNet, GatedGCNNet
 
 
 warnings.filterwarnings("ignore")
@@ -61,12 +61,10 @@ class Runner(object):
             self.sketch_flow_test_folder = os.path.join(self.args.dataset_path, "sketch", self.args.dataset_type, "testing/sketch_flow")
             self.train_dataset = DataLoaderSketchFlow(self.train_folder, self.sketch_flow_train_folder,
                                                       transforms.Compose([transforms.ToTensor()]), resize_height=self.args.h,
-                                                      resize_width=self.args.w, time_step=self.args.t_length-1,
-                                                      which_sketch_flow=self.args.which_sketch_flow)
+                                                      resize_width=self.args.w, time_step=self.args.t_length-1)
             self.test_dataset = DataLoaderSketchFlow(self.test_folder, self.sketch_flow_test_folder,
                                                      transforms.Compose([transforms.ToTensor()]), resize_height=self.args.h,
-                                                     resize_width=self.args.w, time_step=self.args.t_length - 1,
-                                                      which_sketch_flow=self.args.which_sketch_flow)
+                                                     resize_width=self.args.w, time_step=self.args.t_length - 1)
             self.train_batch = data.DataLoader(self.train_dataset, batch_size=self.args.batch_size,
                                                shuffle=True, num_workers=self.args.num_workers,
                                                drop_last=True, collate_fn=self.train_dataset.collate_fn)
@@ -91,12 +89,12 @@ class Runner(object):
         # Model setting
         if self.args.method == 'pred':
             if self.args.has_sketch_flow:
-                gcn_nets = nn.ModuleList([MyGCNNet(node_dim=4, in_dim=128, hidden_dims=self.args.hidden_dims, out_dim=512,
-                                     gnn=self.args.which_gnn) for one in self.args.which_sketch_flow])
-                self.model = ConvAESketchFlow(self.args.c, self.args.t_length, self.args.msize,
-                                              self.args.fdim, self.args.mdim, gcn_nets=gcn_nets)
+                self.model = ConvAESketchFlow(self.args.c, t_length=self.args.t_length, memory_size=self.args.msize,
+                                              feature_dim=self.args.fdim, key_dim=self.args.mdim,
+                                              which_gnn=self.args.which_gnn, hidden_dims=self.args.hidden_dims)
             else:
-                self.model = ConvAEPred(self.args.c, self.args.t_length, self.args.msize, self.args.fdim, self.args.mdim)
+                self.model = ConvAEPred(self.args.c, t_length=self.args.t_length, memory_size=self.args.msize,
+                                        feature_dim=self.args.fdim, key_dim=self.args.mdim)
                 pass
         else:
             self.model = ConvAERecon(self.args.c, memory_size=self.args.msize, feature_dim=self.args.fdim, key_dim=self.args.mdim)
@@ -104,8 +102,7 @@ class Runner(object):
 
         self.params = list(self.model.encoder.parameters()) + list(self.model.decoder.parameters())
         if self.args.has_sketch_flow:
-            for gcn in self.model.gcns:
-                self.params += list(gcn.parameters())
+            self.params += list(self.model.gcn.parameters())
             pass
 
         self.optimizer = torch.optim.Adam(self.params, lr=self.args.lr)
@@ -118,7 +115,7 @@ class Runner(object):
         pass
 
     def train(self):
-        # self.test(epoch=0)
+        self.test(epoch=0)
 
         max_acc = 0.0
         m_items = self.m_items
@@ -126,36 +123,26 @@ class Runner(object):
             self.model.train()
             for j, now_data in enumerate(self.train_batch):
 
+                if self.args.has_sketch_flow:
+                    imgs, batched_graph, nodes_num_norm_sqrt, edges_num_norm_sqrt = now_data
+                    imgs = Variable(imgs).to(self.args.device)
+                else:
+                    imgs = Variable(now_data).to(self.args.device)
+                    pass
+
                 if self.args.method == 'pred':
                     if self.args.has_sketch_flow:
-                        imgs = Variable(now_data[0]).to(self.args.device)
-                        batched_graph, nodes_num_norm_sqrt, edges_num_norm_sqrt = now_data[1:4]
                         batched_graph = batched_graph.to(self.args.device)
                         nodes_feat = batched_graph.ndata['feat'].to(self.args.device)
                         edges_feat = batched_graph.edata['feat'].to(self.args.device)
                         nodes_num_norm_sqrt = nodes_num_norm_sqrt.to(self.args.device)
                         edges_num_norm_sqrt = edges_num_norm_sqrt.to(self.args.device)
-
-                        if not self.train_dataset.is_two_sketch_flow:
-                            (outputs, _, _, m_items, _, _, separateness_loss, compactness_loss) = self.model.forward(
-                                imgs[:, 0:12], m_items, batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt, True)
-                        else:
-                            batched_graph_2, nodes_num_norm_sqrt_2, edges_num_norm_sqrt_2 = now_data[4:]
-                            batched_graph_2 = batched_graph_2.to(self.args.device)
-                            nodes_feat_2 = batched_graph_2.ndata['feat'].to(self.args.device)
-                            edges_feat_2 = batched_graph_2.edata['feat'].to(self.args.device)
-                            nodes_num_norm_sqrt_2 = nodes_num_norm_sqrt_2.to(self.args.device)
-                            edges_num_norm_sqrt_2 = edges_num_norm_sqrt_2.to(self.args.device)
-                            (outputs, _, _, m_items, _, _, separateness_loss, compactness_loss) = self.model.forward(
-                                imgs[:, 0:12], m_items, batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt, True,
-                                batched_graph_2, nodes_feat_2, edges_feat_2, nodes_num_norm_sqrt_2, edges_num_norm_sqrt_2)
-                            pass
+                        (outputs, _, _, m_items, _, _, separateness_loss, compactness_loss) = self.model.forward(
+                            imgs[:, 0:12], m_items, batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt, True)
                     else:
-                        imgs = Variable(now_data).to(self.args.device)
                         (outputs, _, _, m_items, _, _, separateness_loss, compactness_loss) = self.model.forward(imgs[:, 0:12], m_items, True)
                         pass
                 else:
-                    imgs = Variable(now_data).to(self.args.device)
                     (outputs, _, _, m_items, _, _, separateness_loss, compactness_loss) = self.model.forward(imgs, m_items, True)
 
                 self.optimizer.zero_grad()
@@ -239,6 +226,14 @@ class Runner(object):
         self.model.eval()
         m_items_test = self.m_items.clone()
         for k, now_data in enumerate(self.test_batch):
+
+            if self.args.has_sketch_flow:
+                imgs, batched_graph, nodes_num_norm_sqrt, edges_num_norm_sqrt = now_data
+                imgs = Variable(imgs).to(self.args.device)
+            else:
+                imgs = Variable(now_data).to(self.args.device)
+                pass
+
             if self.args.method == 'pred':
                 if k == label_length - 4 * (video_num + 1):
                     video_num += 1
@@ -251,41 +246,25 @@ class Runner(object):
 
             if self.args.method == 'pred':
                 if self.args.has_sketch_flow:
-
-                    imgs = Variable(now_data[0]).to(self.args.device)
-                    batched_graph, nodes_num_norm_sqrt, edges_num_norm_sqrt = now_data[1:4]
                     batched_graph = batched_graph.to(self.args.device)
                     nodes_feat = batched_graph.ndata['feat'].to(self.args.device)
                     edges_feat = batched_graph.edata['feat'].to(self.args.device)
                     nodes_num_norm_sqrt = nodes_num_norm_sqrt.to(self.args.device)
                     edges_num_norm_sqrt = edges_num_norm_sqrt.to(self.args.device)
-
-                    if not self.train_dataset.is_two_sketch_flow:
-                        (outputs, feas, _, m_items_test, _, _, _, _, _, compactness_loss) = self.model.forward(
-                            imgs[:, 0:12], m_items_test, batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt, False)
-                    else:
-                        batched_graph_2, nodes_num_norm_sqrt_2, edges_num_norm_sqrt_2 = now_data[4:]
-                        batched_graph_2 = batched_graph_2.to(self.args.device)
-                        nodes_feat_2 = batched_graph_2.ndata['feat'].to(self.args.device)
-                        edges_feat_2 = batched_graph_2.edata['feat'].to(self.args.device)
-                        nodes_num_norm_sqrt_2 = nodes_num_norm_sqrt_2.to(self.args.device)
-                        edges_num_norm_sqrt_2 = edges_num_norm_sqrt_2.to(self.args.device)
-                        (outputs, feas, _, m_items_test, _, _, _, _, _, compactness_loss) = self.model.forward(
-                            imgs[:, 0:12], m_items_test, batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt, False,
-                            batched_graph_2, nodes_feat_2, edges_feat_2, nodes_num_norm_sqrt_2, edges_num_norm_sqrt_2)
-                        pass
+                    (outputs, feas, _, m_items_test, _, _, _, _, _, compactness_loss) = self.model.forward(
+                        imgs[:, 0:3 * 4], m_items_test, batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt, False)
                 else:
-                    imgs = Variable(now_data).to(self.args.device)
                     (outputs, feas, _, m_items_test, _, _, _, _, _, compactness_loss) = self.model.forward(imgs[:, 0:3 * 4], m_items_test, False)
                     pass
                 mse_imgs = torch.mean(self.loss_func_mse((outputs[0] + 1) / 2, (imgs[0, 3 * 4:] + 1) / 2)).item()
                 mse_feas = compactness_loss.item()
+                # Calculating the threshold for updating at the test time
                 point_sc = point_score(outputs, imgs[:, 3 * 4:])
             else:
-                imgs = Variable(now_data).to(self.args.device)
                 (outputs, feas, _, m_items_test, _, _, compactness_loss) = self.model.forward(imgs, m_items_test, False)
                 mse_imgs = torch.mean(self.loss_func_mse((outputs[0] + 1) / 2, (imgs[0] + 1) / 2)).item()
                 mse_feas = compactness_loss.item()
+                # Calculating the threshold for updating at the test time
                 point_sc = point_score(outputs, imgs)
                 pass
 
@@ -333,7 +312,7 @@ class Runner(object):
     pass
 
 
-def get_arg(gpu_id=0, run_name="demo", has_sketch_flow=True, which_sketch_flow=["cluster"], which_gnn=GCNNet, hidden_dims=None):
+def get_arg(gpu_id=0, run_name="demo", has_sketch_flow=True, which_gnn=GCNNet, hidden_dims=None):
     parser = argparse.ArgumentParser(description="MNAD")
     parser.add_argument('--batch_size', type=int, default=4, help='batch size for training')
     parser.add_argument('--test_batch_size', type=int, default=1, help='batch size for test')
@@ -359,7 +338,6 @@ def get_arg(gpu_id=0, run_name="demo", has_sketch_flow=True, which_sketch_flow=[
     args = parser.parse_args()
 
     args.device = gpu_setup(use_gpu=True, gpu_id=str(gpu_id))
-    args.which_sketch_flow = which_sketch_flow
     args.which_gnn = which_gnn
     args.hidden_dims = hidden_dims
     args.has_sketch_flow = has_sketch_flow
@@ -368,77 +346,32 @@ def get_arg(gpu_id=0, run_name="demo", has_sketch_flow=True, which_sketch_flow=[
 
 
 """
-No Sketch Flow, AUC=93.5%
-   Sketch Flow, AUC=94.7%
-          Half, AUC=95.3%
-          Half, AUC=96.6%
-         Param, AUC=94.4%
-         Param, AUC=96.6%
-      Original, AUC=96.3%
-
-   Sketch Flow, AUC=96.1% 4layer GCN track_line
-   Sketch Flow, AUC=96.7% 4layer GCN cluster
-   Sketch Flow, AUC=96.6% 4layer GraphSage cluster
-   Sketch Flow, AUC=95.3% 4layer GatedGCN cluster
-   
-   Sketch Flow, AUC=96.6% 6layer GCN cluster
-   Sketch Flow, AUC=97.0% 6layer GCN cluster
-"""
-
-
-"""
-cluster_sage_6layer 96.45, 96.78
-cluster_gcn_6layer  93.96, 91.46
-seed2022 cluster_GraphSageNet_4layer 95.53
-seed2022 cluster_GraphSageNet_6layer 95.28
-
-seed1 No sketch_flow              94.84
-seed1 cluster_GraphSageNet_4layer 93.83
-seed1 cluster_GraphSageNet_6layer 94.42
-
-seed2 No sketch_flow              95.97
-seed2 cluster_GraphSageNet_4layer 96.51
-seed2 cluster_GraphSageNet_6layer 96.68
-seed2     all_GraphSageNet_4layer 94.13
-
-seed3 No sketch_flow              94.18
-seed3 cluster_GraphSageNet_4layer 95.28
-seed3 cluster_GraphSageNet_6layer 95.32
-
-seed4 No sketch_flow              94.93
-seed4 cluster_GraphSageNet_4layer 94.99
-seed4 cluster_GraphSageNet_6layer 95.13
-"""
-
-
-"""
-seed2 No sketch_flow              95.15
-seed2 cluster_GraphSageNet_4layer 95.53
-seed2 cluster_GraphSageNet_6layer 94.08
+seed2 No sketch_flow       95.97
+seed2 GraphSageNet 2layer  95.27
+seed2 GraphSageNet 4layer  92.52
+seed2 GraphSageNet 6layer  96.53
 """
 
 
 """
 cd /media/ubuntu/4T2/ubuntu/4T/ALISURE/MNAD
-nohup python Runner_SketchFlow.py > ./result/log/ped2/pred/2_seed2_cluster_GraphSageNet_4layer.log 2>&1 &
+nohup python Runner_SketchFlow.py > ./result/log/ped2/pred3/0_seed2_GraphSageNet_4layer.log 2>&1 &
 """
 
 
 if __name__ == '__main__':
     seed = 2
-    gpu_id = 0
-    has_sketch_flow = False
-    # which_sketch_flow = ["cluster", "track_line"]
-    which_sketch_flow = ["cluster"]  # cluster, track_line
-    # which_sketch_flow = "[track_line" ] # cluster, track_line
+    gpu_id = 2
+    has_sketch_flow = True
     which_gnn = GraphSageNet  # GCNNet, GraphSageNet, GatedGCNNet
-    hidden_dims = [128, 128, 256, 256]  # [128, 128, 256, 256, 512, 512], [128, 128, 256, 256]
-    # hidden_dims = [128, 128, 256, 256, 512, 512]  # [128, 128, 256, 256, 512, 512], [128, 128, 256, 256]
+    # hidden_dims = [128, 256]
+    # hidden_dims = [128, 128, 256, 256]
+    hidden_dims = [128, 128, 256, 256, 512, 512]
 
     seed_setup(seed)
     runner = Runner(args=get_arg(
-        gpu_id=gpu_id, has_sketch_flow=has_sketch_flow, which_sketch_flow=which_sketch_flow, which_gnn=which_gnn, hidden_dims=hidden_dims,
-        run_name="{}_{}_{}layer_{}seed".format("_".join(which_sketch_flow), which_gnn.__name__, len(hidden_dims), seed)))
+        gpu_id=gpu_id, has_sketch_flow=has_sketch_flow, which_gnn=which_gnn, hidden_dims=hidden_dims,
+        run_name="{}seed_{}_{}layer".format(seed, which_gnn.__name__, len(hidden_dims))))
     runner.train()
     pass
 
