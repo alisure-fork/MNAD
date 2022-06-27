@@ -14,7 +14,7 @@ import torchvision.transforms as transforms
 from model.Reconstruction import convAE as ConvAERecon
 from model.utils import DataLoader, DataLoaderSketchFlow
 from model.final_future_prediction_with_memory_spatial_sumonly_weight_ranking_top1 import convAE as ConvAEPred
-from model.final_future_prediction_with_memory_spatial_sumonly_weight_ranking_top1 import ConvAESketchFlow, GraphSageNet, GCNNet, GatedGCNNet
+from model.final_future_prediction_with_memory_spatial_sumonly_weight_ranking_top1 import GCNNet, GraphSageNet, GatedGCNNet, MyGCNNet, ConvAESketchFlow
 
 
 warnings.filterwarnings("ignore")
@@ -89,9 +89,9 @@ class Runner(object):
         # Model setting
         if self.args.method == 'pred':
             if self.args.has_sketch_flow:
+                gcn_net = MyGCNNet(which_gnn=self.args.which_gnn, node_dim=4, in_dim=128, hidden_dims=self.args.hidden_dims, out_dim=512)
                 self.model = ConvAESketchFlow(self.args.c, t_length=self.args.t_length, memory_size=self.args.msize,
-                                              feature_dim=self.args.fdim, key_dim=self.args.mdim,
-                                              which_gnn=self.args.which_gnn, hidden_dims=self.args.hidden_dims)
+                                              feature_dim=self.args.fdim, key_dim=self.args.mdim, gcn_net=gcn_net)
             else:
                 self.model = ConvAEPred(self.args.c, t_length=self.args.t_length, memory_size=self.args.msize,
                                         feature_dim=self.args.fdim, key_dim=self.args.mdim)
@@ -350,18 +350,26 @@ seed2 No sketch_flow       95.97
 seed2 GraphSageNet 2layer  95.27
 seed2 GraphSageNet 4layer  92.52
 seed2 GraphSageNet 6layer  96.53
+
+seed0 GraphSageNet 6layer  95.78
+seed2 GraphSageNet 6layer  96.53
+seed1 GraphSageNet 6layer  96.06
+seed3 GraphSageNet 6layer  95.91
+
+seed2 GraphSageNet 6layer  96.68
 """
 
 
 """
+conda activate alisurepy36torch17
 cd /media/ubuntu/4T2/ubuntu/4T/ALISURE/MNAD
-nohup python Runner_SketchFlow.py > ./result/log/ped2/pred3/0_seed2_GraphSageNet_4layer.log 2>&1 &
+nohup python Runner_SketchFlow.py > ./result/log/ped2/pred3/run3_seed2_GraphSageNet_6layer.log 2>&1 &
 """
 
 
 if __name__ == '__main__':
     seed = 2
-    gpu_id = 2
+    gpu_id = 3
     has_sketch_flow = True
     which_gnn = GraphSageNet  # GCNNet, GraphSageNet, GatedGCNNet
     # hidden_dims = [128, 256]

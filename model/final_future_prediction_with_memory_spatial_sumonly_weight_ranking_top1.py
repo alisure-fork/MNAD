@@ -250,12 +250,12 @@ class MyGCNNet(nn.Module):
 class ConvAESketchFlow(torch.nn.Module):
 
     def __init__(self, n_channel=3, t_length=5, memory_size=10, feature_dim=512,
-                 key_dim=512, temp_update=0.1, temp_gather=0.1, which_gnn=GCNNet, hidden_dims=[128, 256]):
+                 key_dim=512, temp_update=0.1, temp_gather=0.1, gcn_net=GCNNet):
         super(ConvAESketchFlow, self).__init__()
 
         self.encoder = Encoder(t_length, n_channel)
         self.decoder = Decoder(t_length, n_channel)
-        self.gcn = MyGCNNet(which_gnn=which_gnn, node_dim=4, in_dim=128, hidden_dims=hidden_dims, out_dim=512)
+        self.gcn = gcn_net
         self.memory = Memory(memory_size, feature_dim, key_dim, temp_update, temp_gather)
         pass
 
