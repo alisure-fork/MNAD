@@ -51,18 +51,17 @@ class Runner(object):
 
         self.log_dir = Tools.new_dir(os.path.join('./result/exp', self.args.dataset_type,
                                                   self.args.method, self.args.exp_dir))
+        self.log_txt = os.path.join(self.log_dir, "log.txt")
 
         # Loading dataset
         self.train_folder = os.path.join(self.args.dataset_path, self.args.dataset_type, "training/frames")
         self.test_folder = os.path.join(self.args.dataset_path, self.args.dataset_type, "testing/frames")
 
         if self.args.has_sketch_flow:
-            self.sketch_flow_train_folder = os.path.join(self.args.dataset_path, "sketch", self.args.dataset_type, "training/sketch_flow")
-            self.sketch_flow_test_folder = os.path.join(self.args.dataset_path, "sketch", self.args.dataset_type, "testing/sketch_flow")
-            self.train_dataset = DataLoaderSketchFlow(self.train_folder, self.sketch_flow_train_folder,
+            self.train_dataset = DataLoaderSketchFlow(self.train_folder, self.args.sketch_flow_train_folder,
                                                       transforms.Compose([transforms.ToTensor()]), resize_height=self.args.h,
                                                       resize_width=self.args.w, time_step=self.args.t_length-1)
-            self.test_dataset = DataLoaderSketchFlow(self.test_folder, self.sketch_flow_test_folder,
+            self.test_dataset = DataLoaderSketchFlow(self.test_folder, self.args.sketch_flow_test_folder,
                                                      transforms.Compose([transforms.ToTensor()]), resize_height=self.args.h,
                                                      resize_width=self.args.w, time_step=self.args.t_length - 1)
             self.train_batch = data.DataLoader(self.train_dataset, batch_size=self.args.batch_size,
@@ -158,18 +157,18 @@ class Runner(object):
 
             self.scheduler.step()
 
-            Tools.print('----------------------------------------')
-            Tools.print('Epoch: {}'.format(epoch + 1))
+            Tools.print('----------------------------------------', txt_path=self.log_txt)
+            Tools.print('Epoch: {}'.format(epoch + 1), txt_path=self.log_txt)
 
             # Save the model and the memory items
             # self.save_model(epoch=epoch)
 
             if self.args.method == 'pred':
                 Tools.print('Loss: Prediction {:.6f}/ Compactness {:.6f}/ Separateness {:.6f}'.format(
-                    loss_pixel.item(), compactness_loss.item(), separateness_loss.item()))
+                    loss_pixel.item(), compactness_loss.item(), separateness_loss.item()), txt_path=self.log_txt)
             else:
                 Tools.print('Loss: Reconstruction {:.6f}/ Compactness {:.6f}/ Separateness {:.6f}'.format(
-                    loss_pixel.item(), compactness_loss.item(), separateness_loss.item()))
+                    loss_pixel.item(), compactness_loss.item(), separateness_loss.item()), txt_path=self.log_txt)
                 pass
 
             if (epoch + 1) % 2 == 0:
@@ -178,13 +177,13 @@ class Runner(object):
                     max_acc = acc
                 pass
 
-            Tools.print('----------------------------------------')
+            Tools.print('----------------------------------------', txt_path=self.log_txt)
             pass
 
         # Save and test the final model
         # self.save_model()
         self.test()
-        Tools.print(max_acc)
+        Tools.print(max_acc, txt_path=self.log_txt)
         pass
 
     def test(self, epoch=-1):
@@ -206,7 +205,7 @@ class Runner(object):
         psnr_list = {}
         feature_distance_list = {}
 
-        Tools.print('Evaluation of {} in epoch {}'.format(self.args.dataset_type, epoch + 1))
+        Tools.print('Evaluation of {} in epoch {}'.format(self.args.dataset_type, epoch + 1), txt_path=self.log_txt)
         # Setting for video anomaly detection
         for video in sorted(videos_list):
             video_name = video.split('/')[-1]
@@ -290,29 +289,31 @@ class Runner(object):
         anomaly_score_total_list = np.asarray(anomaly_score_total_list)
         accuracy = AUC(anomaly_score_total_list, np.expand_dims(1-labels_list, 0)) * 100
 
-        Tools.print('The result of {} in epoch {}'.format(self.args.dataset_type, epoch + 1))
-        Tools.print('AUC: {} %'.format(accuracy))
+        Tools.print('The result of {} in epoch {}'.format(self.args.dataset_type, epoch + 1), txt_path=self.log_txt)
+        Tools.print('AUC: {} %'.format(accuracy), txt_path=self.log_txt)
         return accuracy
 
     def save_model(self, epoch=-1):
-        Tools.print('Training of Epoch {} is finished'.format(epoch + 1))
+        Tools.print('Training of Epoch {} is finished'.format(epoch + 1), txt_path=self.log_txt)
         if (epoch + 1) % 5 == 0:
             torch.save(self.model, os.path.join(self.log_dir, 'model_{}.pth'.format(epoch + 1)))
             torch.save(self.m_items, os.path.join(self.log_dir, 'keys_{}.pt'.format(epoch + 1)))
-            Tools.print('Saving model of {} in {}'.format(epoch + 1, self.log_dir))
+            Tools.print('Saving model of {} in {}'.format(epoch + 1, self.log_dir), txt_path=self.log_txt)
             pass
         if epoch < 0:
-            Tools.print('Training is finished')
+            Tools.print('Training is finished', txt_path=self.log_txt)
             torch.save(self.model, os.path.join(self.log_dir, 'model.pth'))
             torch.save(self.m_items, os.path.join(self.log_dir, 'keys.pt'))
-            Tools.print('Saving final model in {}'.format(self.log_dir))
+            Tools.print('Saving final model in {}'.format(self.log_dir), txt_path=self.log_txt)
             pass
         pass
 
     pass
 
 
-def get_arg(gpu_id=0, run_name="demo", has_sketch_flow=True, which_gnn=GCNNet, hidden_dims=None):
+def get_arg(gpu_id=0, run_name="demo", has_sketch_flow=True,
+            which_gnn=GCNNet, which_sketch_flow="sketch_flow/9_40_8",
+            hidden_dims=None, which_sketch="sketch_10_40_25"):
     parser = argparse.ArgumentParser(description="MNAD")
     parser.add_argument('--batch_size', type=int, default=4, help='batch size for training')
     parser.add_argument('--test_batch_size', type=int, default=1, help='batch size for test')
@@ -334,6 +335,10 @@ def get_arg(gpu_id=0, run_name="demo", has_sketch_flow=True, which_gnn=GCNNet, h
     parser.add_argument('--num_workers_test', type=int, default=1, help='number of workers for the test loader')
     parser.add_argument('--dataset_path', type=str, default='./data', help='directory of data')
     parser.add_argument('--dataset_type', type=str, default='ped2', help='type of dataset: ped2, avenue, shanghai')
+    parser.add_argument('--sketch_flow_train_folder', type=str,
+                        default='./data/{}/ped2/training/{}'.format(which_sketch, which_sketch_flow))
+    parser.add_argument('--sketch_flow_test_folder', type=str,
+                        default='./data/{}/ped2/testing/{}'.format(which_sketch, which_sketch_flow))
     parser.add_argument('--exp_dir', type=str, default='{}_{}'.format(gpu_id, run_name), help='directory of log')
     args = parser.parse_args()
 
@@ -346,17 +351,21 @@ def get_arg(gpu_id=0, run_name="demo", has_sketch_flow=True, which_gnn=GCNNet, h
 
 
 """
-seed2 No sketch_flow       95.97
-seed2 GraphSageNet 2layer  95.27
-seed2 GraphSageNet 4layer  92.52
-seed2 GraphSageNet 6layer  96.53
-
 seed0 GraphSageNet 6layer  95.78
-seed2 GraphSageNet 6layer  96.53
 seed1 GraphSageNet 6layer  96.06
+seed2 GraphSageNet 6layer  96.53
 seed3 GraphSageNet 6layer  95.91
 
+seed1 No sketch_flow       94.84
+seed2 No sketch_flow       95.97
+seed3 No sketch_flow       94.18
+seed4 No sketch_flow       94.93
+
+seed0 GraphSageNet 6layer  94.40
+seed1 GraphSageNet 6layer  94.42
 seed2 GraphSageNet 6layer  96.68
+seed3 GraphSageNet 6layer  95.32
+seed4 GraphSageNet 6layer  95.13
 """
 
 
@@ -369,17 +378,24 @@ nohup python Runner_SketchFlow.py > ./result/log/ped2/pred3/run3_seed2_GraphSage
 
 if __name__ == '__main__':
     seed = 2
-    gpu_id = 3
+    gpu_id = 1
     has_sketch_flow = True
     which_gnn = GraphSageNet  # GCNNet, GraphSageNet, GatedGCNNet
     # hidden_dims = [128, 256]
     # hidden_dims = [128, 128, 256, 256]
     hidden_dims = [128, 128, 256, 256, 512, 512]
+    which_sketch = "sketch_25_40_25"  # sketch_10_40_25, sketch_25_40_25
+    # which_sketch_flow = "sketch_flow/9_40_8"
+    # which_sketch_flow = "sketch_flow_abl_t/5_40_8"
+    which_sketch_flow = "sketch_flow_abl_t/13_40_8"
 
     seed_setup(seed)
     runner = Runner(args=get_arg(
-        gpu_id=gpu_id, has_sketch_flow=has_sketch_flow, which_gnn=which_gnn, hidden_dims=hidden_dims,
-        run_name="{}seed_{}_{}layer".format(seed, which_gnn.__name__, len(hidden_dims))))
+        gpu_id=gpu_id, has_sketch_flow=has_sketch_flow, which_gnn=which_gnn,
+        hidden_dims=hidden_dims, which_sketch=which_sketch, which_sketch_flow=which_sketch_flow,
+        run_name="{}_{}seed_{}_{}layer_{}".format(
+            which_sketch, seed, which_gnn.__name__, len(hidden_dims), which_sketch_flow.replace("/", "_"))))
+    Tools.print(runner.log_dir)
     runner.train()
     pass
 

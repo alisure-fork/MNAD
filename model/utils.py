@@ -96,7 +96,7 @@ class SketchFlowGraph(object):
             for two in self.node_data:
                 dis = np.sqrt((one.point[0] - two.point[0]) ** 2 + (one.point[1] - two.point[1]) ** 2)
                 if dis < th:
-                    _edge_w.append(1 - dis / th)
+                    _edge_w.append(1 / (dis + 1))
                     edge_index.append([one.index, two.index])
                 pass
             edge_w.extend(_edge_w / np.sum(_edge_w, axis=0))
@@ -179,10 +179,7 @@ class DataLoaderSketchFlow(data.Dataset):
             for frame in videos[video_name]['frame']:
                 video_name = frame.split("/")[-2]
                 index = int(os.path.splitext(frame.split("/")[-1])[0])
-                # sketch_flow_path = os.path.join(
-                #     sketch_flow_folder, "{}/25_40_25/{}/9/track_line/{}.txt".format(video_name, video_name, index))
-                sketch_flow_path = os.path.join(
-                    sketch_flow_folder, "{}/25_40_25/{}/9/cluster/{}.txt".format(video_name, video_name, index))
+                sketch_flow_path = os.path.join(sketch_flow_folder, "{}/{}.txt".format(video_name, index))
                 assert os.path.exists(sketch_flow_path)
                 graph =  SketchFlowGraph(sketch_flow_path, image_size)
                 videos[video_name]['sketch_flow'].append(graph)

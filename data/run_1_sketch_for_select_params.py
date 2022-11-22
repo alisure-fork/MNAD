@@ -1,29 +1,28 @@
 import os
 import glob
 import shutil
+import itertools
 from PIL import Image, ImageEnhance
 import multiprocessing
 from alisuretool.Tools import Tools
 
 
-PARM_1 = 25
-PARM_2 = 40
-PARM_3 = 25
-
-# PARM_1 = 35
-# PARM_2 = 100
-# PARM_3 = 5
+# PARM_1 = 25
+# PARM_2 = 40
+# PARM_3 = 25
 
 
 class Image2Sketch(object):
 
     def __init__(self, image_path, result_path, temp_path, result_image_size=None,
-                 exe_path="D:\\Pycharm\\File\\sketch_flow\\SketchFlow\\exe\\Sketching_thres_3.exe"):
+                 exe_path="D:\\Pycharm\\File\\sketch_flow\\SketchFlow\\exe\\Sketching_thres_3.exe", param=None):
         self.image_path = image_path
         self.temp_path = Tools.new_dir(temp_path)
         self.result_image_size = result_image_size
         self.exe_path = exe_path
-        self.result_path = os.path.join(result_path, "{}_{}_{}".format(PARM_1, PARM_2, PARM_3))
+        self.param = param if param is not None else {"PARM_1": 25, "PARM_2": 40, "PARM_3": 25}
+
+        self.result_path = os.path.join(result_path)
 
         self.path_origin_image = Tools.new_dir(os.path.join(self.result_path, "image_origin"))
         self.path_gray_image = Tools.new_dir(os.path.join(self.result_path, "image_gray"))
@@ -33,7 +32,7 @@ class Image2Sketch(object):
         self.path_sketch_image = Tools.new_dir(os.path.join(self.result_path, "sketch_image"))
         self.sketch_image_filename = "{}_sketch.bmp".format(self.image_name)
         self.path_sketch_txt = Tools.new_dir(os.path.join(self.result_path, "sketch_txt"))
-        self.sketch_txt_filename = "{}_1_m{}_graph.txt".format(self.image_name, PARM_1)
+        self.sketch_txt_filename = "{}_1_m{}_graph.txt".format(self.image_name, self.param["PARM_1"])
         pass
 
     def run_sketch(self, check_has_finish=True):
@@ -59,7 +58,8 @@ class Image2Sketch(object):
 
         # 执行程序
         # try:
-        os.system("{} {} {} {} {}".format(self.exe_path, tem_dst, PARM_1, PARM_2, PARM_3))
+        os.system("{} {} {} {} {}".format(self.exe_path, tem_dst, self.param["PARM_1"],
+                                          self.param["PARM_2"], self.param["PARM_3"]))
         # except Exception:
         #     return
 
@@ -68,8 +68,14 @@ class Image2Sketch(object):
             shutil.copy(tem_dst, self.path_origin_image)  # 原始图片
             temp_result_path = os.path.splitext(tem_dst)[0]
             shutil.copy(os.path.join(temp_result_path, self.image_name_ext), self.path_gray_image)  # 灰度图
-            shutil.copy(os.path.join(temp_result_path, self.sketch_image_filename), self.path_sketch_image)  # 素描图
-            shutil.copy(os.path.join(temp_result_path, self.sketch_txt_filename), self.path_sketch_txt)  # 素描图txt
+            shutil.copy(os.path.join(temp_result_path, self.sketch_image_filename),
+                        os.path.join(self.path_sketch_image, "{}-{}-{}_{}".format(
+                            self.param["PARM_1"], self.param["PARM_2"], self.param["PARM_3"],
+                            self.sketch_image_filename)))  # 素描图
+            shutil.copy(os.path.join(temp_result_path, self.sketch_txt_filename),
+                        os.path.join(self.path_sketch_txt, "{}-{}-{}_{}".format(
+                            self.param["PARM_1"], self.param["PARM_2"], self.param["PARM_3"],
+                            self.sketch_txt_filename)))  # 素描图txt
         except Exception:
             Tools.print("------------------------------------------------------------------------------")
             Tools.print(self.image_path)
@@ -94,11 +100,12 @@ class Image2Sketch(object):
 
 class Image2SketchList(object):
 
-    def __init__(self, image_path, result_path, result_image_size=None):
+    def __init__(self, image_path, result_path, result_image_size=None, param=None):
         self.image_path = image_path
         self.result_path = result_path
         self.result_image_size = result_image_size
         self.temp_path = os.path.join(".\\temp", os.path.basename(image_path))
+        self.param = param
         pass
 
     def _sketch_one(self, image_index, image_one, all_num):
@@ -106,8 +113,8 @@ class Image2SketchList(object):
         # Tools.print("{} {}/{}".format(image_one, image_index, all_num))
         # Tools.print("#############################################################################")
 
-        image_2_sketch = Image2Sketch(image_path=image_one, result_path=self.result_path,
-                                      temp_path=self.temp_path, result_image_size=self.result_image_size)
+        image_2_sketch = Image2Sketch(image_path=image_one, result_path=self.result_path, temp_path=self.temp_path,
+                                      result_image_size=self.result_image_size, param=self.param)
         image_2_sketch.run_sketch()
         pass
 
@@ -176,13 +183,19 @@ class Image2SketchList(object):
 
 if __name__ == '__main__':
     _result_image_size = [256, 256]
-    video_root_list = [
-        "./ped2/testing/frames", "./ped2/training/frames", "./avenue/testing/frames",
-        "./avenue/training/frames"
-    ]
-    for video_root in video_root_list:
-        Image2SketchList.run_all_sketch(video_root=video_root,
-                                        result_root=os.path.join("./sketch", video_root),
-                                        result_image_size=_result_image_size)
+    image_name = "055.jpg"
+    image_path = "./ped2/testing/frames/01"
+    result_root = os.path.join("./sketch_select", image_path)
+
+    # param_1 = list(range(10, 101, 10))
+    # for one, two, three in itertools.combinations_with_replacement(param_1, 3):
+    param_1 = [[10, 40, 25]]
+    for one, two, three in param_1:
+        param = {"PARM_1": one, "PARM_2": two, "PARM_3": three}
+        Tools.print(param)
+        image_2_sketch_list = Image2SketchList(image_path=image_path, result_path=result_root,
+                                               result_image_size=_result_image_size, param=param)
+        image_2_sketch_list._sketch_one(0, os.path.join(image_path, image_name), 1)
+        shutil.rmtree(image_2_sketch_list.temp_path)
         pass
     pass
