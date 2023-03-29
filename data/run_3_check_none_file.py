@@ -9,7 +9,7 @@ def check_none_file(root_path):
     for one in all_txt:
         with open(one) as f:
             now_txt = f.readlines()
-            if len(now_txt) < 2:
+            if len(now_txt) < 1:
                 print(one)
             pass
         pass
@@ -23,7 +23,8 @@ def generate_none_file_content(root_path, image_root):
         all_file = glob.glob(os.path.join(one_video, "*.jpg"))
         all_name = sorted([os.path.basename(one_file).split(".")[0] for one_file in all_file])
         all_txt_file = glob.glob(os.path.join(root_path, os.path.basename(one_video),  "**/*.txt"), recursive=True)
-        all_txt_name = sorted([os.path.basename(one_txt).split(".")[0].zfill(3) for one_txt in all_txt_file])
+        z_fill = 4 if len(all_txt_file) > 999 else 3
+        all_txt_name = sorted([os.path.basename(one_txt).split(".")[0].zfill(z_fill) for one_txt in all_txt_file])
         for one_name in all_name:
             if one_name not in all_txt_name:
                 print(one_video, one_name)  # 缺少
@@ -90,12 +91,28 @@ def three(_run_name):
     pass
 
 
+def four(_run_name):
+    _root_path = "D:\\Pycharm\\File\\sketch_flow\\UVAD\\MNAD\\data"
+    _run_sketch = "sketch_25_40_25"
+    _run_param = ["9_40_8"]
+    for param in _run_param:
+        for split_data in ["testing", "training"]:
+            root_path = os.path.join(_root_path, "{}\\sht\\{}\\{}\\{}".format(_run_sketch, split_data, _run_name, param))
+            print(root_path)
+            check_none_file(root_path=root_path)
+            generate_none_file_content(
+                root_path=root_path, image_root=os.path.join(_root_path, "sht\\{}\\frames".format(split_data)))
+            pass
+    pass
+
+
 if __name__ == '__main__':
     # one()  # 原始的代码
     # two()  # 检查叠加帧的参数
-    three(_run_name="sketch_flow_remove_dsl")
-    three(_run_name="sketch_flow_remove_nsl")
-    three(_run_name="sketch_flow_remove_dsl_and_nsl")
+    # three(_run_name="sketch_flow_remove_dsl")
+    # three(_run_name="sketch_flow_remove_nsl")
+    # three(_run_name="sketch_flow_remove_dsl_and_nsl")
+    four(_run_name="sketch_flow_first")
     pass
 
 

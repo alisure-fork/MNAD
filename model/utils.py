@@ -78,12 +78,15 @@ SketchFlowGraphNode = namedtuple("SketchFlowGraphNode",
 
 class SketchFlowGraph(object):
 
-    def __init__(self, sketch_flow_txt, image_size):
+    def __init__(self, sketch_flow_txt, image_size, feature_size=0):
         self.sketch_flow_txt = sketch_flow_txt
         self.image_size = image_size
 
         self.node_data = self.read_txt(self.sketch_flow_txt, self.image_size)
         self.edge_index, self.edge_w = self.set_edge()
+        self.position = None
+        if feature_size > 0:
+            self.position = self.set_position(size=feature_size)
         pass
 
     def __len__(self):
@@ -116,6 +119,17 @@ class SketchFlowGraph(object):
             edge_w.extend(_edge_w / np.sum(_edge_w, axis=0))
             pass
         return np.asarray(edge_index), np.asarray(edge_w)
+
+    def set_position(self, size):
+        position = np.zeros(shape=(size, size), dtype=np.int)
+        xy_index = [[int(one.point[0] * size), int(one.point[1] * size)] for one in self.node_data]
+        for x, y in xy_index:
+            x = (size - 1) if x >= size else x
+            y = (size - 1) if y >= size else y
+            x = 0 if x < 0 else x
+            y = 0 if y < 0 else y
+            position[y][x] = 1
+        return position
 
     def merge_node_data(self):
         np_data = [np.asarray([one.length, one.angle, one.displacement, one.direction]) for one in self.node_data]
@@ -234,6 +248,101 @@ class DataLoaderSketchFlow(data.Dataset):
         batched_graph = dgl.batch(graphs)
 
         return images, batched_graph, nodes_num_norm_sqrt, edges_num_norm_sqrt
+
+    pass
+
+
+class DataLoaderSketchFlowPosition(data.Dataset):
+
+    def __init__(self, video_folder, sketch_flow_folder, transform, resize_height, resize_width,
+                 time_step=4, num_pred=1, feature_size=32):
+        self.video_folder = video_folder
+        self.sketch_flow_folder = sketch_flow_folder
+        self.transform = transform
+        self._resize_height = resize_height
+        self._resize_width = resize_width
+        self._time_step = time_step
+        self._num_pred = num_pred
+        self._feature_size = feature_size
+
+        self.videos = self.setup(self.video_folder, self.sketch_flow_folder,
+                                 self._resize_width, feature_size=self._feature_size)
+        self.samples = self.get_all_samples()
+        pass
+
+    @staticmethod
+    def setup(video_folder, sketch_flow_folder, image_size, feature_size=32):
+        videos = OrderedDict()
+        video_images = glob.glob(os.path.join(video_folder, '*'))
+        for video in tqdm(sorted(video_images)):
+            video_name = video.split('/')[-1]
+            videos[video_name] = {}
+            videos[video_name]['path'] = video
+            videos[video_name]['frame'] = glob.glob(os.path.join(video, '*.jpg'))
+            videos[video_name]['frame'].sort()
+            videos[video_name]['length'] = len(videos[video_name]['frame'])
+
+            videos[video_name]['sketch_flow'] = []
+            for frame in videos[video_name]['frame']:
+                video_name = frame.split("/")[-2]
+                index = int(os.path.splitext(frame.split("/")[-1])[0])
+                sketch_flow_path = os.path.join(sketch_flow_folder, "{}/{}.txt".format(video_name, index))
+                assert os.path.exists(sketch_flow_path)
+                graph = SketchFlowGraph(sketch_flow_path, image_size, feature_size=feature_size)
+                videos[video_name]['sketch_flow'].append(graph)
+                pass
+            pass
+        return videos
+
+    def get_all_samples(self):
+        frames = []
+        videos = glob.glob(os.path.join(self.video_folder, '*'))
+        for video in sorted(videos):
+            video_name = video.split('/')[-1]
+            for i in range(len(self.videos[video_name]['frame']) - self._time_step):
+                frames.append(self.videos[video_name]['frame'][i])
+            pass
+        return frames
+
+    def __getitem__(self, index):
+        video_name = self.samples[index].split('/')[-2]
+        frame_name = int(self.samples[index].split('/')[-1].split('.')[-2])
+
+        batch = []
+        for i in range(self._time_step + self._num_pred):
+            image = np_load_frame(self.videos[video_name]['frame'][frame_name + i],
+                                  self._resize_height, self._resize_width)
+            batch.append(self.transform(image) if self.transform is not None else image)
+            pass
+
+        my_graph = self.videos[video_name]['sketch_flow'][frame_name + self._time_step + self._num_pred - 1]
+        node_data = my_graph.merge_node_data()
+        edge_index, edge_w = my_graph.edge_index, my_graph.edge_w
+
+        graph = dgl.DGLGraph()
+        graph.add_nodes(len(my_graph))
+        graph.add_edges(edge_index[:, 0], edge_index[:, 1])
+        graph.edata['feat'] = torch.from_numpy(edge_w).unsqueeze(1).float()
+        graph.ndata['feat'] = torch.from_numpy(node_data).float()
+
+        return np.concatenate(batch, axis=0), graph, my_graph.position
+
+    def __len__(self):
+        return len(self.samples)
+
+    @staticmethod
+    def collate_fn(samples):
+        images, graphs, positions = map(list, zip(*samples))
+        images = torch.tensor(np.array(images))
+        positions = torch.tensor(np.array(positions))
+
+        _nodes_num = [graph.number_of_nodes() for graph in graphs]
+        _edges_num = [graph.number_of_edges() for graph in graphs]
+        nodes_num_norm_sqrt = torch.cat([torch.zeros((num, 1)).fill_(1./num) for num in _nodes_num]).sqrt()
+        edges_num_norm_sqrt = torch.cat([torch.zeros((num, 1)).fill_(1./num) for num in _edges_num]).sqrt()
+        batched_graph = dgl.batch(graphs)
+
+        return images, batched_graph, nodes_num_norm_sqrt, edges_num_norm_sqrt, positions
 
     pass
 

@@ -114,17 +114,20 @@ def abl_l(seed=2, gpu_id=0):
     pass
 
 
-def abl_remove(seed=2, gpu_id=0):
+def abl_remove(seed=2, gpu_id=0, which_sketch_flow_list=None):
     Tools.print("seed={} gpu id={}".format(seed, gpu_id))
     has_sketch_flow = True
     which_gnn = GraphSageNet
     # hidden_dims = [128, 128, 256, 256, 512, 512]
+    # hidden_dims = [128, 128, 256, 256]
     hidden_dims = [128, 128]
     which_sketch = "sketch_25_40_25"
-    # which_sketch_flow_list = ["sketch_flow_abl_remove_dsl/9_40_8",
-    #                           "sketch_flow_abl_remove_nsl/9_40_8"]
-    which_sketch_flow_list = ["sketch_flow_abl_remove_dsl_and_nsl/9_40_8",
-                              "sketch_flow/9_40_8"]
+    if which_sketch_flow_list is None:
+        # which_sketch_flow_list = ["sketch_flow_abl_remove_dsl/9_40_8",
+        #                           "sketch_flow_abl_remove_nsl/9_40_8"]
+        which_sketch_flow_list = ["sketch_flow_abl_remove_dsl_and_nsl/9_40_8",
+                                  "sketch_flow/9_40_8"]
+        pass
 
     for which_sketch_flow in which_sketch_flow_list:
         seed_setup(seed)
@@ -152,6 +155,6 @@ if __name__ == '__main__':
     # abl_c()
     # abl_l(gpu_id=1)
     # abl_remove(gpu_id=0)
-    abl_remove(gpu_id=1)
+    # abl_remove(gpu_id=0, which_sketch_flow_list=["sketch_flow_abl_remove_nsl/9_40_8"])
     pass
 

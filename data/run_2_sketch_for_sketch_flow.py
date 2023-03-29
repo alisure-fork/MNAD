@@ -6,17 +6,17 @@ import multiprocessing
 from alisuretool.Tools import Tools
 
 
-# PARM_1 = 25
-# PARM_2 = 40
-# PARM_3 = 25
+PARM_1 = 25
+PARM_2 = 40
+PARM_3 = 25
 
 # PARM_1 = 35
 # PARM_2 = 100
 # PARM_3 = 5
 
-PARM_1 = 10
-PARM_2 = 40
-PARM_3 = 25
+# PARM_1 = 10
+# PARM_2 = 40
+# PARM_3 = 25
 
 
 class Image2Sketch(object):
@@ -53,10 +53,10 @@ class Image2Sketch(object):
             Image.open(self.image_path).resize(self.result_image_size).save(tem_dst)
 
             # 有些图片太暗了，所以增强一下
-            # im = Image.open(self.image_path).resize(self.result_image_size)
-            # bright = ImageEnhance.Brightness(im)
-            # im = bright.enhance(1.2)
-            # im.save(tem_dst)
+            im = Image.open(self.image_path).resize(self.result_image_size)
+            bright = ImageEnhance.Brightness(im)
+            im = bright.enhance(1.2)  # 1.2, 1.5, 1.8
+            im.save(tem_dst)
         else:
             tem_dst = shutil.copy(self.image_path, self.temp_path)
             pass
@@ -69,11 +69,13 @@ class Image2Sketch(object):
 
         # 复制需要的文件
         try:
-            shutil.copy(tem_dst, self.path_origin_image)  # 原始图片
             temp_result_path = os.path.splitext(tem_dst)[0]
-            shutil.copy(os.path.join(temp_result_path, self.image_name_ext), self.path_gray_image)  # 灰度图
-            shutil.copy(os.path.join(temp_result_path, self.sketch_image_filename), self.path_sketch_image)  # 素描图
             shutil.copy(os.path.join(temp_result_path, self.sketch_txt_filename), self.path_sketch_txt)  # 素描图txt
+
+            # 复制其他图像，为了节省空间，所以注释了
+            # shutil.copy(tem_dst, self.path_origin_image)  # 原始图片
+            # shutil.copy(os.path.join(temp_result_path, self.image_name_ext), self.path_gray_image)  # 灰度图
+            # shutil.copy(os.path.join(temp_result_path, self.sketch_image_filename), self.path_sketch_image)  # 素描图
         except Exception:
             Tools.print("------------------------------------------------------------------------------")
             Tools.print(self.image_path)
@@ -181,14 +183,16 @@ class Image2SketchList(object):
 if __name__ == '__main__':
     _result_image_size = [256, 256]
     video_root_list = [
-        "./ped2/testing/frames",
-        "./ped2/training/frames",
+        # "./ped2/testing/frames",
+        # "./ped2/training/frames",
         # "./avenue/testing/frames",
-        # "./avenue/training/frames"
+        # "./avenue/training/frames",
+        # "./sht/testing/video",
+        "./sht/training/frames"
     ]
     for video_root in video_root_list:
         Image2SketchList.run_all_sketch(video_root=video_root,
-                                        result_root=os.path.join("./sketch_10_40_25", video_root),
-                                        result_image_size=_result_image_size)
+                                        result_root=os.path.join("./sketch_25_40_25", video_root),
+                                        result_image_size=_result_image_size, multi_processing=True)
         pass
     pass

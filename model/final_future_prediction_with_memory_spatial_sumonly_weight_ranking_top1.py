@@ -259,12 +259,18 @@ class ConvAESketchFlow(torch.nn.Module):
         self.memory = Memory(memory_size, feature_dim, key_dim, temp_update, temp_gather)
         pass
 
-    def forward(self, x, keys, batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt, train=True):
+    def forward(self, x, keys, batched_graph, nodes_feat, edges_feat,
+                nodes_num_norm_sqrt, edges_num_norm_sqrt, train=True, position=None):
         fea, skip1, skip2, skip3 = self.encoder(x)
 
         gcn_feature = self.gcn.forward(batched_graph, nodes_feat, edges_feat, nodes_num_norm_sqrt, edges_num_norm_sqrt)
         gcn_feature_softmax = torch.softmax(gcn_feature, dim=1)
-        fea = fea + fea * gcn_feature_softmax.unsqueeze(-1).unsqueeze(-1)
+
+        # 融合，是否按position融合
+        if position is None:
+            fea = fea + fea * gcn_feature_softmax.unsqueeze(-1).unsqueeze(-1)
+        else:
+            fea = fea + fea * gcn_feature_softmax.unsqueeze(-1).unsqueeze(-1) * position.unsqueeze(1)
 
         if train:
             updated_fea, keys, softmax_score_query, softmax_score_memory, separateness_loss, compactness_loss = self.memory(fea, keys, train)
@@ -277,4 +283,3 @@ class ConvAESketchFlow(torch.nn.Module):
         pass
 
     pass
-
